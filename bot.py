@@ -87,10 +87,13 @@ async def check_user(callback: MessageCallback):
             await callback.chat.send(message, parse_mode=ParseMode.HTML)
             return
 
+    user = callback.chat.dialog_with_user
+    username = f"{user.first_name} {user.last_name}"
+
     await redis_storage.save_user(
         chat_id=chat_id,
         user_id=user_id,
-        username=callback.chat.dialog_with_user.username,
+        username=username,
         status=True
     )
     message = await redis_storage.get_success_message()
