@@ -1,0 +1,120 @@
+{% extends "_base.html" %}
+
+{% block content %}
+
+<div class="message-hint">
+    Во всех сообщениях поддерживаются HTML-теги: &lt;b&gt;, &lt;i&gt;, &lt;a&gt;, и т.д.
+</div>
+<div class="message-hint">
+    см <a href="https://dev.max.ru/docs-api#HTML">официальную документацию MAX</a> по форматированию сообщений.
+</div>
+<br>
+<form id="messages-form">
+
+    <div class="message-field">
+        <label for="welcome-message">
+            Приветственное сообщение
+        </label>
+
+        <textarea
+            id="welcome-message"
+            name="welcome"
+            rows="4"
+        >{{ messages.welcome }}</textarea>
+
+        <div class="message-hint">
+            Отправляется пользователю при приветствии.
+        </div>
+    </div>
+
+
+    <div class="message-field">
+        <label for="start-message">
+            Сообщение при /start
+        </label>
+
+        <textarea
+            id="start-message"
+            name="start"
+            rows="6"
+        >{{ messages.start }}</textarea>
+
+    </div>
+
+
+    <div class="message-field">
+        <label for="success-message">
+            Сообщение при успешной подписке
+        </label>
+
+        <textarea
+            id="success-message"
+            name="success"
+            rows="4"
+        >{{ messages.success }}</textarea>
+    </div>
+
+
+    <div class="message-field">
+        <label for="fail-message">
+            Сообщение при отсутствии подписки
+        </label>
+
+        <textarea
+            id="fail-message"
+            name="fail"
+            rows="4"
+        >{{ messages.fail }}</textarea>
+    </div>
+
+
+    <div class="actions">
+        <button type="submit">
+            Сохранить
+        </button>
+
+        <span id="status"></span>
+    </div>
+
+</form>
+
+
+<script>
+    document
+        .getElementById("messages-form")
+        .addEventListener("submit", async function (event) {
+            event.preventDefault();
+
+            const status = document.getElementById("status");
+
+            const messages = {
+                welcome: document.getElementById("welcome-message").value,
+                start: document.getElementById("start-message").value,
+                success: document.getElementById("success-message").value,
+                fail: document.getElementById("fail-message").value,
+            };
+
+            status.textContent = "Сохранение...";
+
+            try {
+                const response = await fetch("/admin/bot-messages", {
+                    method: "PUT",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify(messages)
+                });
+
+                if (!response.ok) {
+                    throw new Error("Ошибка сохранения");
+                }
+
+                status.textContent = "Сохранено!";
+            } catch (error) {
+                console.error(error);
+                status.textContent = "Ошибка сохранения";
+            }
+        });
+</script>
+
+{% endblock %}

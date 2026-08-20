@@ -1,0 +1,140 @@
+{% extends "_base.html" %}
+
+{% block content %}
+
+<div class="users-info">
+    Всего участников: {{ total }}
+</div>
+
+<table>
+    <thead>
+        <tr>
+            <th>ID чата</th>
+            <th>ID пользователя</th>
+            <th>Имя пользователя</th>
+            <th>Дата обновления</th>
+            <th>Статус</th>
+        </tr>
+    </thead>
+
+    <tbody>
+        {% for user in users %}
+        <tr>
+            <td>
+                {{ user.chat_id }}
+            </td>
+
+            <td>
+                {{ user.user_id }}
+            </td>
+
+            <td>
+                {{ user.username }}
+            </td>
+
+            <td>
+                {{ user.date_updated }}
+            </td>
+
+            <td>
+                {% if user.status %}
+                    <span class="status status-active">
+                        Проверен
+                    </span>
+                {% else %}
+                    <span class="status status-inactive">
+                        Не подписан / новый
+                    </span>
+                {% endif %}
+            </td>
+        </tr>
+
+        {% else %}
+        <tr>
+            <td colspan="3">
+                Пользователей пока нет.
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% if total_pages > 1 %}
+<div class="pagination">
+
+    {% if page > 1 %}
+        <a href="{{ url_for('users') }}?page={{ page - 1 }}&per_page={{ per_page }}">
+            ← Назад
+        </a>
+    {% else %}
+        <span class="disabled">
+            ← Назад
+        </span>
+    {% endif %}
+
+
+    {# First page #}
+    <a
+        href="{{ url_for('users') }}?page=1&per_page={{ per_page }}"
+        class="{% if page == 1 %}active{% endif %}"
+    >
+        1
+    </a>
+
+
+    {# Ellipsis before current page window #}
+    {% if page > 12 %}
+        <span>...</span>
+    {% endif %}
+
+
+    {# Pages around current page #}
+    {% set start_page = [2, page - 10]|max %}
+    {% set end_page = [total_pages - 1, page + 10]|min %}
+
+    {% for page_number in range(start_page, end_page + 1) %}
+
+        {% if page_number == page %}
+            <span class="active">
+                {{ page_number }}
+            </span>
+        {% else %}
+            <a href="{{ url_for('users') }}?page={{ page_number }}&per_page={{ per_page }}">
+                {{ page_number }}
+            </a>
+        {% endif %}
+
+    {% endfor %}
+
+
+    {# Ellipsis after current page window #}
+    {% if page < total_pages - 11 %}
+        <span>...</span>
+    {% endif %}
+
+
+    {# Last page #}
+    {% if total_pages > 1 %}
+        <a
+            href="{{ url_for('users') }}?page={{ total_pages }}&per_page={{ per_page }}"
+            class="{% if page == total_pages %}active{% endif %}"
+        >
+            {{ total_pages }}
+        </a>
+    {% endif %}
+
+
+    {% if page < total_pages %}
+        <a href="{{ url_for('users') }}?page={{ page + 1 }}&per_page={{ per_page }}">
+            Вперёд →
+        </a>
+    {% else %}
+        <span class="disabled">
+            Вперёд →
+        </span>
+    {% endif %}
+
+</div>
+{% endif %}
+
+{% endblock %}

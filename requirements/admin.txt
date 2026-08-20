@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+uvloop
+asyncio
+Jinja2==3.1.6
+redis[hiredis]

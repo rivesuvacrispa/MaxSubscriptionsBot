@@ -1,0 +1,188 @@
+import datetime
+import json
+import os
+import redis.asyncio as redis
+
+redis_client = redis.Redis(
+    host=os.getenv("REDIS_HOST"),
+    port=int(os.getenv("REDIS_PORT")),
+    decode_responses=True,
+)
+
+
+async def get_channel_checklist() -> list[dict]:
+    """ Получить список всех чатов по которым нужно проверить подписку
+
+    Формат чата:
+    --------
+    id: int
+        Айди чата/канала
+    link: string
+        Ссылка на вступление
+    title: string
+        Название
+    enabled: bool
+        Требуется ли для участия в розыгрыше
+    """
+    data = await redis_client.get("chats")
+
+    if data is None:
+        return []
+
+    data = json.loads(data)
+    return [i for i in data if i.get('enabled', False)]
+
+
+async def get_all_chats() -> list[dict]:
+    """ Получить список всех чатов по которым нужно проверить подписку
+
+    Формат чата:
+    --------
+    id: int
+        Айди чата/канала
+    link: string
+        Ссылка на вступление
+    title: string
+        Название
+    enabled: bool
+        Требуется ли для участия в розыгрыше
+    """
+    data = await redis_client.get("chats")
+
+    if data is None:
+        return []
+
+    return json.loads(data)
+
+
+async def set_chat_checklist(chats: list[dict]) -> None:
+    """ Сохранить/перезаписать список всех чатов для проверки подписок """
+    await redis_client.set("chats", json.dumps(chats))
+
+
+async def get_user_count() -> int:
+    """Получить счетчик пользователей, нажавших на кнопку "я подписался"."""
+    return await redis_client.zcard("users:index")
+
+
+async def get_users(
+    page: int = 1,
+    per_page: int = 50,
+) -> tuple[list[dict], int]:
+    """Получить данные пользователей.
+
+    Формат пользователя:
+    --------
+    chat_id: int
+        Айди чата пользователя
+    user_id: int
+        Айди пользователя
+    username: str
+        Юзернейм пользователя
+    date_updated: string
+        Дата обновления статуса
+    status: bool
+        Статус участия
+    """
+
+    start = (page - 1) * per_page
+    end = start + per_page - 1
+
+    user_ids = await redis_client.zrevrange(
+        "users:index",
+        start,
+        end,
+    )
+
+    async with redis_client.pipeline() as pipe:
+        for user_id in user_ids:
+            await pipe.hgetall(f"user:{user_id}")
+
+        results = await pipe.execute()
+
+    users = [
+        {
+            "chat_id": int(user.get("chat_id", 0)),
+            "user_id": int(user.get("user_id", 0)),
+            "username": user.get("username", ""),
+            "date_updated": user.get("date_updated", None),
+            "status": bool(int(user.get("status", 0))),
+        }
+        for user in results
+    ]
+
+    total = await get_user_count()
+    return users, total
+
+
+async def get_user_status(chat_id: int) -> bool:
+    """Получить статус участия пользователя в розыгрыше."""
+    status = await redis_client.hget(
+        f"user:{chat_id}",
+        "status",
+    )
+
+    if status is None:
+        return False
+
+    return bool(int(status))
+
+
+async def save_user(chat_id: int, user_id: int, username: str | None, status: bool) -> None:
+    """Сохраняет чат-айди пользователя, дату участия и статус проверки пользователя."""
+
+    date_updated = datetime.datetime.now(datetime.timezone.utc)
+
+    await redis_client.hset(
+        f"user:{chat_id}",
+        mapping={
+            "chat_id": chat_id,
+            "user_id": user_id,
+            "username": str(username),
+            "date_updated": date_updated.isoformat(),
+            "status": int(status),
+        },
+    )
+
+    await redis_client.zadd(
+        "users:index",
+        {
+            str(chat_id): date_updated.timestamp(),
+        },
+    )
+
+
+async def set_welcome_message(message: str) -> None:
+    await redis_client.set("message:welcome", message)
+
+
+async def get_welcome_message() -> str:
+    message = await redis_client.get("message:welcome")
+    return message or "Привет! Отправь мне /start"
+
+
+async def set_start_message(message: str) -> None:
+    await redis_client.set("message:start", message)
+
+
+async def get_start_message() -> str:
+    message = await redis_client.get("message:start")
+    return message or "Для участия в розыгрыше вы должны подписаться на следующие каналы:"
+
+
+async def set_success_message(message: str) -> None:
+    await redis_client.set("message:success", message)
+
+
+async def get_success_message() -> str:
+    message = await redis_client.get("message:success")
+    return message or "Вы успешно участвуете в розыгрыше!"
+
+
+async def set_fail_message(message: str) -> None:
+    await redis_client.set("message:fail", message)
+
+
+async def get_fail_message() -> str:
+    message = await redis_client.get("message:fail")
+    return message or "Вы не подписаны на все каналы!"

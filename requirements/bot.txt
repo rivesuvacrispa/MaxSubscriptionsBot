@@ -1,0 +1,5 @@
+maxapi
+redis[hiredis]
+httpx[socks]
+python-dotenv
+pillow

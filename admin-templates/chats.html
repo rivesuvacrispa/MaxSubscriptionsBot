@@ -1,0 +1,156 @@
+{% extends "_base.html" %}
+
+{% block content %}
+
+<table id="channels-table">
+    <thead>
+        <tr>
+            <th>Айди канала/чата</th>
+            <th>Ссылка на вступление</th>
+            <th>Название</th>
+            <th>Требует подписки</th>
+            <th></th>
+        </tr>
+    </thead>
+
+    <tbody>
+        {% for channel in channels %}
+        <tr>
+            <td>
+                <input
+                    type="number"
+                    class="channel-id"
+                    value="{{ channel.id }}"
+                >
+            </td>
+
+            <td>
+                <input
+                    type="text"
+                    class="channel-link"
+                    value="{{ channel.link }}"
+                >
+            </td>
+
+            <td>
+                <input
+                    type="text"
+                    class="channel-title"
+                    value="{{ channel.title }}"
+                >
+            </td>
+
+            <td>
+                <input
+                    type="checkbox"
+                    class="channel-enabled"
+                    {% if channel.enabled %}checked{% endif %}
+                >
+            </td>
+
+            <td>
+                <button
+                    type="button"
+                    class="delete-button"
+                    onclick="deleteRow(this)"
+                >
+                    Удалить
+                </button>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<div class="actions">
+    <button type="button" onclick="addRow()">
+        Добавить чат
+    </button>
+
+    <button type="button" onclick="saveChannels()">
+        Сохранить
+    </button>
+
+    <span id="status"></span>
+</div>
+
+<script>
+    function addRow() {
+        const tbody = document.querySelector("#channels-table tbody");
+
+        const row = document.createElement("tr");
+
+        row.innerHTML = `
+            <td>
+                <input type="number" class="channel-id">
+            </td>
+
+            <td>
+                <input type="text" class="channel-link">
+            </td>
+
+            <td>
+                <input type="text" class="channel-title">
+            </td>
+
+            <td>
+                <input type="checkbox" class="channel-enabled" checked>
+            </td>
+
+            <td>
+                <button
+                    type="button"
+                    class="delete-button"
+                    onclick="deleteRow(this)"
+                >
+                    Удалить
+                </button>
+            </td>
+        `;
+
+        tbody.appendChild(row);
+    }
+
+    function deleteRow(button) {
+        button.closest("tr").remove();
+    }
+
+    function getChannelsFromTable() {
+        const rows = document.querySelectorAll("#channels-table tbody tr");
+
+        return Array.from(rows).map(row => ({
+            id: Number(row.querySelector(".channel-id").value),
+            link: row.querySelector(".channel-link").value,
+            title: row.querySelector(".channel-title").value,
+            enabled: row.querySelector(".channel-enabled").checked
+        }));
+    }
+
+    async function saveChannels() {
+        const channels = getChannelsFromTable();
+        const status = document.querySelector("#status");
+
+        status.textContent = "Сохранение...";
+
+        try {
+            const response = await fetch("/admin/chats", {
+                method: "PUT",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(channels)
+            });
+
+            if (!response.ok) {
+                throw new Error("Ошибка сохранения");
+            }
+
+            status.textContent = "Сохранено!";
+        } catch (error) {
+            console.error(error);
+            status.textContent = "Ошибка сохранения";
+        }
+    }
+</script>
+
+{% endblock %}

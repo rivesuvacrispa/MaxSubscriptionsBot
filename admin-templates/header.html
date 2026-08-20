@@ -1,0 +1,52 @@
+<header class="admin-header">
+    <nav class="admin-nav">
+        <a
+            href="{{ url_for('chats') }}"
+            class="{% if request.url.path == '/admin/chats' %}active{% endif %}"
+        >
+            Настройка чатов
+        </a>
+
+        <a
+            href="{{ url_for('bot-messages') }}"
+            class="{% if request.url.path == '/admin/bot-messages' %}active{% endif %}"
+        >
+            Настройка сообщений
+        </a>
+
+        <a
+            href="{{ url_for('users') }}"
+            class="{% if request.url.path == '/admin/users' %}active{% endif %}"
+        >
+            Список участников
+        </a>
+    </nav>
+</header>
+
+<style>
+    .admin-header {
+        border-bottom: 1px solid #ddd;
+        margin-bottom: 30px;
+    }
+
+    .admin-nav {
+        display: flex;
+        gap: 5px;
+    }
+
+    .admin-nav a {
+        padding: 12px 20px;
+        text-decoration: none;
+        color: #333;
+        border-bottom: 2px solid transparent;
+    }
+
+    .admin-nav a:hover {
+        background: #f5f5f5;
+    }
+
+    .admin-nav a.active {
+        border-bottom-color: #333;
+        font-weight: bold;
+    }
+</style>
