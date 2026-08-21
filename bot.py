@@ -11,7 +11,9 @@ import redis_storage
 logging.basicConfig(level=logging.INFO)
 
 bot = Bot(os.getenv("BOT_TOKEN"))
-dp = Dispatcher()
+# use_create_task=True: события обрабатываются параллельно; дефолтный
+# последовательный режим давал ~6 нажатий/с — очередь встаёт при наплыве
+dp = Dispatcher(use_create_task=True)
 
 
 # Ответ бота при нажатии на кнопку "Начать": сразу список каналов и кнопка проверки
