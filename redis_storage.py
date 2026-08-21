@@ -3,10 +3,16 @@ import json
 import os
 import redis.asyncio as redis
 
+# BlockingConnectionPool: при исчерпании пула запрос ждёт свободное соединение,
+# а не падает с MaxConnectionsError (важно при шторме одновременных регистраций)
 redis_client = redis.Redis(
-    host=os.getenv("REDIS_HOST"),
-    port=int(os.getenv("REDIS_PORT")),
-    decode_responses=True,
+    connection_pool=redis.BlockingConnectionPool(
+        host=os.getenv("REDIS_HOST"),
+        port=int(os.getenv("REDIS_PORT")),
+        decode_responses=True,
+        max_connections=int(os.getenv("REDIS_MAX_CONNECTIONS", "100")),
+        timeout=None,
+    )
 )
 
 
