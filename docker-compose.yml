@@ -22,6 +22,16 @@ services:
     ports:
       - "127.0.0.1:${ADMIN_PORT}:8000"
 
+  snapshot:
+    build:
+      context: .
+      dockerfile: snapshot.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      - redis
+
   redis:
     image: redis:8-alpine
     restart: unless-stopped
