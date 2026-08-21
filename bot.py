@@ -65,20 +65,26 @@ async def check_user(callback: MessageCallback):
         return
 
     channels = await redis_storage.get_channel_checklist()
+    missing = []
     for channel in channels:
         channel_id = channel.get('id')
-        is_member = False
         try:
             member = await bot.get_chat_member(channel_id, user_id)
-            is_member = member is not None
         except Exception as e:
             logging.error(f"Не удалось проверить пользователя в канале [{channel_id}]! Бот точно администратор? Ошибка:")
             logging.error(e)
+            # канал недоступен для проверки — исключаем его из требований
+            continue
 
-        if not is_member:
-            message = await redis_storage.get_fail_message()
-            await callback.chat.send(message, parse_mode=ParseMode.HTML)
-            return
+        if member is None:
+            missing.append(channel)
+
+    if missing:
+        message = await redis_storage.get_fail_message()
+        for counter, channel in enumerate(missing, start=1):
+            message += f"""\n№{counter} - <a href="{channel.get('link')}">{channel.get('title')}</a>"""
+        await callback.chat.send(message, parse_mode=ParseMode.HTML)
+        return
 
     user = callback.chat.dialog_with_user
     username = f"{user.first_name} {user.last_name}"
