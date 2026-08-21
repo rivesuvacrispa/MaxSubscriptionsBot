@@ -4,6 +4,7 @@ import os
 
 from maxapi import Bot, Dispatcher, F
 from maxapi.enums import ParseMode
+from maxapi.exceptions import MaxApiError
 from maxapi.types import BotStarted, CallbackButton, MessageCallback
 from maxapi.utils.inline_keyboard import InlineKeyboardBuilder
 import redis_storage
@@ -14,6 +15,12 @@ bot = Bot(os.getenv("BOT_TOKEN"))
 # use_create_task=True: события обрабатываются параллельно; дефолтный
 # последовательный режим давал ~6 нажатий/с — очередь встаёт при наплыве
 dp = Dispatcher(use_create_task=True)
+
+# ограничивает число одновременных проверок подписки, чтобы при наплыве
+# не выйти за лимиты MAX API; сверх лимита нажатия ждут своей очереди
+check_semaphore = asyncio.Semaphore(int(os.getenv("MAX_CONCURRENT_CHECKS", "64")))
+
+TRANSIENT_CHECK_ERROR = "Не получилось проверить подписку, попробуйте ещё раз через пару минут."
 
 
 # Ответ бота при нажатии на кнопку "Начать": сразу список каналов и кнопка проверки
@@ -69,19 +76,29 @@ async def check_user(callback: MessageCallback):
     channels = await redis_storage.get_channel_checklist()
     missing = []
     unavailable = 0
-    for channel in channels:
-        channel_id = channel.get('id')
-        try:
-            member = await bot.get_chat_member(channel_id, user_id)
-        except Exception as e:
-            logging.error(f"Не удалось проверить пользователя в канале [{channel_id}]! Бот точно администратор? Ошибка:")
-            logging.error(e)
-            # канал недоступен для проверки — исключаем его из требований
-            unavailable += 1
-            continue
+    async with check_semaphore:
+        for channel in channels:
+            channel_id = channel.get('id')
+            try:
+                member = await bot.get_chat_member(channel_id, user_id)
+            except MaxApiError as e:
+                if e.code in (403, 404):
+                    logging.error(f"Нет доступа к каналу [{channel_id}]! Бот точно администратор? Ошибка:")
+                    logging.error(e)
+                    # канал недоступен для проверки — исключаем его из требований
+                    unavailable += 1
+                    continue
+                # 429/5xx — временный сбой API: не искажаем результат, просим повторить
+                logging.warning(f"Временная ошибка API при проверке канала [{channel_id}]: {e}")
+                await callback.chat.send(TRANSIENT_CHECK_ERROR, parse_mode=ParseMode.HTML)
+                return
+            except Exception as e:
+                logging.warning(f"Сбой при проверке канала [{channel_id}]: {e!r}")
+                await callback.chat.send(TRANSIENT_CHECK_ERROR, parse_mode=ParseMode.HTML)
+                return
 
-        if member is None:
-            missing.append(channel)
+            if member is None:
+                missing.append(channel)
 
     if channels and unavailable == len(channels):
         # не удалось проверить ни один канал — не засчитываем участие,
