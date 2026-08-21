@@ -97,6 +97,15 @@ async def index(
     )
 
 
+@app.delete("/admin/users/{chat_id}")
+async def delete_user(
+    chat_id: int,
+    _: Annotated[str, Depends(basic_auth)] = None,
+):
+    await redis_storage.delete_user(chat_id)
+    return {"status": "ok"}
+
+
 @app.get("/admin/users/export", name="users-export")
 async def export_users(_: Annotated[str, Depends(basic_auth)]):
     async def generate():

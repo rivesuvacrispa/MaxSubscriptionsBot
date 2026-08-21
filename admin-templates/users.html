@@ -15,6 +15,7 @@
             <th>Имя пользователя</th>
             <th>Дата обновления</th>
             <th>Статус</th>
+            <th></th>
         </tr>
     </thead>
 
@@ -48,11 +49,21 @@
                     </span>
                 {% endif %}
             </td>
+
+            <td>
+                <button
+                    type="button"
+                    class="delete-button"
+                    onclick="deleteUser({{ user.chat_id }})"
+                >
+                    Удалить
+                </button>
+            </td>
         </tr>
 
         {% else %}
         <tr>
-            <td colspan="3">
+            <td colspan="6">
                 Пользователей пока нет.
             </td>
         </tr>
@@ -137,5 +148,28 @@
 
 </div>
 {% endif %}
+
+<script>
+    async function deleteUser(chatId) {
+        if (!confirm("Удалить пользователя " + chatId + "? Он пропадёт из базы и счётчика участников.")) {
+            return;
+        }
+
+        try {
+            const response = await fetch("/admin/users/" + chatId, {
+                method: "DELETE"
+            });
+
+            if (!response.ok) {
+                throw new Error("Ошибка удаления");
+            }
+
+            location.reload();
+        } catch (error) {
+            console.error(error);
+            alert("Не удалось удалить пользователя");
+        }
+    }
+</script>
 
 {% endblock %}

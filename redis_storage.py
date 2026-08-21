@@ -197,6 +197,15 @@ async def save_user(chat_id: int, user_id: int, username: str | None, status: bo
         await redis_client.sadd("users:verified", str(chat_id))
 
 
+async def delete_user(chat_id: int) -> None:
+    """Полностью удаляет пользователя из базы (хеш, индекс, счётчик участников)."""
+    async with redis_client.pipeline() as pipe:
+        await pipe.delete(f"user:{chat_id}")
+        await pipe.zrem("users:index", str(chat_id))
+        await pipe.srem("users:verified", str(chat_id))
+        await pipe.execute()
+
+
 async def set_welcome_message(message: str) -> None:
     await redis_client.set("message:welcome", message)
 

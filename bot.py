@@ -28,9 +28,8 @@ async def bot_started(event: BotStarted):
         status=False
     )
 
-    counter = 1
-    for channel in channels:
-        message += f"""\n#№{counter} - <a href="{channel.get('link')}">{channel.get('title')}</a>"""
+    for counter, channel in enumerate(channels, start=1):
+        message += f"""\n№{counter} - <a href="{channel.get('link')}">{channel.get('title')}</a>"""
 
     participants = await redis_storage.get_participant_count()
     if "{count}" in message:
