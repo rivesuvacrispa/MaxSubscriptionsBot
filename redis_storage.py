@@ -163,6 +163,35 @@ async def iter_all_users(batch_size: int = 500):
         start += batch_size
 
 
+async def iter_chat_ids(verified_only: bool = False, batch_size: int = 1000):
+    """Итерирует chat_id всех пользователей (или только подтверждённых).
+
+    Используется для снапшота получателей рассылки. SSCAN может отдавать
+    дубликаты — потребитель обязан быть к ним готов (вставка с ON CONFLICT).
+    """
+    if verified_only:
+        cursor = 0
+        while True:
+            cursor, members = await redis_client.sscan(
+                "users:verified", cursor=cursor, count=batch_size
+            )
+            for member in members:
+                yield int(member)
+            if cursor == 0:
+                return
+    else:
+        start = 0
+        while True:
+            chat_ids = await redis_client.zrange(
+                "users:index", start, start + batch_size - 1
+            )
+            if not chat_ids:
+                return
+            for chat_id in chat_ids:
+                yield int(chat_id)
+            start += batch_size
+
+
 async def get_user_status(chat_id: int) -> bool:
     """Получить статус участия пользователя в розыгрыше."""
     status = await redis_client.hget(

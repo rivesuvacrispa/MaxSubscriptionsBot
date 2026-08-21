@@ -20,6 +20,13 @@
         >
             Список участников
         </a>
+
+        <a
+            href="{{ url_for('broadcasts') }}"
+            class="{% if request.url.path == '/admin/broadcasts' %}active{% endif %}"
+        >
+            Рассылки
+        </a>
     </nav>
 </header>
 

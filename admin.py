@@ -4,6 +4,7 @@ import datetime
 import io
 import secrets
 import os
+import pg_storage
 import redis_storage
 from typing import Annotated
 from fastapi import Depends, FastAPI, HTTPException, status, Request, Body
@@ -143,6 +144,131 @@ async def export_users(_: Annotated[str, Depends(basic_auth)]):
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# Допустимые исходные статусы для каждого целевого статуса ручек
+# pause/resume/cancel. Запуск (draft/paused -> running) валидируется отдельно
+# самим pg_storage.start_broadcast. Гард "текущий статус ∈ from" живёт в
+# UPDATE на стороне БД, поэтому гонка с воркером даёт 409, а не затирание.
+BROADCAST_TRANSITIONS = {
+    "paused": ["running"],
+    "running": ["paused"],
+    "cancelled": ["draft", "running", "paused"],
+}
+
+BROADCAST_AUDIENCES = ("all", "verified")
+
+
+def _serialize_broadcast(b: dict) -> dict:
+    def fmt(dt):
+        return dt.astimezone(datetime.timezone.utc).isoformat() if dt else None
+
+    return {
+        "id": b["id"],
+        "audience": b["audience"],
+        "body": b["body"],
+        "status": b["status"],
+        "total": b["total"],
+        "sent": b["sent"],
+        "failed": b["failed"],
+        "created_at": fmt(b["created_at"]),
+        "started_at": fmt(b["started_at"]),
+        "finished_at": fmt(b["finished_at"]),
+    }
+
+
+@app.get("/admin/broadcasts", name="broadcasts")
+async def broadcasts_page(request: Request, _: Annotated[str, Depends(basic_auth)]):
+    broadcasts = await pg_storage.list_broadcasts()
+    return templates.TemplateResponse(
+        request,
+        name="broadcasts.html",
+        context={
+            "page_title": "Рассылки",
+            "broadcasts": [_serialize_broadcast(b) for b in broadcasts],
+        },
+    )
+
+
+@app.get("/admin/broadcasts/data")
+async def broadcasts_data(_: Annotated[str, Depends(basic_auth)]):
+    broadcasts = await pg_storage.list_broadcasts()
+    return {"broadcasts": [_serialize_broadcast(b) for b in broadcasts]}
+
+
+@app.post("/admin/broadcasts")
+async def create_broadcast(
+    payload: dict = Body(...),
+    _: Annotated[str, Depends(basic_auth)] = None,
+):
+    audience = payload.get("audience")
+    body = (payload.get("body") or "").strip()
+
+    if audience not in BROADCAST_AUDIENCES:
+        raise HTTPException(status_code=400, detail="Некорректная аудитория")
+    if not body:
+        raise HTTPException(status_code=400, detail="Текст рассылки не может быть пустым")
+
+    broadcast_id = await pg_storage.create_broadcast(audience, body)
+    return {"status": "ok", "id": broadcast_id}
+
+
+@app.post("/admin/broadcasts/{broadcast_id}/start")
+async def start_broadcast(
+    broadcast_id: int,
+    _: Annotated[str, Depends(basic_auth)] = None,
+):
+    try:
+        await pg_storage.start_broadcast(broadcast_id)
+    except pg_storage.BroadcastNotFound:
+        raise HTTPException(status_code=404, detail="Рассылка не найдена")
+    except pg_storage.BroadcastNotStartable:
+        raise HTTPException(
+            status_code=409,
+            detail="Рассылку нельзя запустить из текущего статуса",
+        )
+    return {"status": "ok"}
+
+
+@app.post("/admin/broadcasts/{broadcast_id}/pause")
+async def pause_broadcast(
+    broadcast_id: int,
+    _: Annotated[str, Depends(basic_auth)] = None,
+):
+    return await _set_broadcast_status(broadcast_id, "paused")
+
+
+@app.post("/admin/broadcasts/{broadcast_id}/resume")
+async def resume_broadcast(
+    broadcast_id: int,
+    _: Annotated[str, Depends(basic_auth)] = None,
+):
+    return await _set_broadcast_status(broadcast_id, "running")
+
+
+@app.post("/admin/broadcasts/{broadcast_id}/cancel")
+async def cancel_broadcast(
+    broadcast_id: int,
+    _: Annotated[str, Depends(basic_auth)] = None,
+):
+    return await _set_broadcast_status(broadcast_id, "cancelled")
+
+
+async def _set_broadcast_status(broadcast_id: int, status: str) -> dict:
+    broadcast = await pg_storage.get_broadcast(broadcast_id)
+    if broadcast is None:
+        raise HTTPException(status_code=404, detail="Рассылка не найдена")
+
+    try:
+        await pg_storage.set_broadcast_status(
+            broadcast_id, status, BROADCAST_TRANSITIONS[status]
+        )
+    except pg_storage.BroadcastStatusConflict:
+        raise HTTPException(
+            status_code=409,
+            detail="Состояние рассылки изменилось, обновите страницу",
+        )
+    return {"status": "ok"}
 
 
 @app.get("/admin/bot-messages", name="bot-messages")

@@ -1,0 +1,229 @@
+{% extends "_base.html" %}
+
+{% block content %}
+
+<div class="message-hint">
+    Сообщение уходит всем получателям из выбранной аудитории.
+    Поддерживаются HTML-теги, см
+    <a href="https://dev.max.ru/docs-api#HTML">документацию MAX</a>.
+    Состав получателей фиксируется в момент запуска рассылки.
+</div>
+<br>
+
+<form id="broadcast-form">
+    <div class="message-field">
+        <label for="broadcast-body">Текст рассылки</label>
+        <textarea id="broadcast-body" name="body" rows="6"></textarea>
+    </div>
+
+    <div class="message-field">
+        <label for="broadcast-audience">Аудитория</label>
+        <select id="broadcast-audience" name="audience">
+            <option value="all">Все, кто запускал бота</option>
+            <option value="verified">Только подтверждённые участники</option>
+        </select>
+    </div>
+
+    <div class="actions">
+        <button type="submit">Создать черновик</button>
+        <span id="status"></span>
+    </div>
+</form>
+
+<br>
+
+<table>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Создана</th>
+            <th>Аудитория</th>
+            <th>Текст</th>
+            <th>Статус</th>
+            <th>Прогресс</th>
+            <th>Действия</th>
+        </tr>
+    </thead>
+    <tbody id="broadcasts-tbody">
+    </tbody>
+</table>
+
+<style>
+    #broadcast-audience {
+        padding: 6px;
+        font-size: 14px;
+    }
+
+    .broadcast-body-cell {
+        max-width: 400px;
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+
+    .broadcast-actions button {
+        margin-right: 5px;
+        padding: 6px 10px;
+    }
+
+    .status-draft { color: #999; }
+    .status-running { color: green; }
+    .status-paused { color: #b8860b; }
+    .status-cancelled { color: #d9534f; }
+    .status-done { color: #333; }
+</style>
+
+<script>
+    const STATUS_LABELS = {
+        draft: "Черновик",
+        running: "Идёт",
+        paused: "Пауза",
+        cancelled: "Отменена",
+        done: "Завершена",
+    };
+
+    const AUDIENCE_LABELS = {
+        all: "Все",
+        verified: "Подтверждённые",
+    };
+
+    // какие действия доступны в каждом статусе
+    const ACTIONS = {
+        draft: [["start", "Запустить"], ["cancel", "Отменить"]],
+        running: [["pause", "Пауза"], ["cancel", "Отменить"]],
+        paused: [["resume", "Возобновить"], ["cancel", "Отменить"]],
+        cancelled: [],
+        done: [],
+    };
+
+    function renderBroadcasts(broadcasts) {
+        const tbody = document.getElementById("broadcasts-tbody");
+        tbody.textContent = "";
+
+        for (const b of broadcasts) {
+            const tr = document.createElement("tr");
+
+            const cells = [
+                b.id,
+                b.created_at ? new Date(b.created_at).toLocaleString("ru-RU") : "",
+                AUDIENCE_LABELS[b.audience] || b.audience,
+            ];
+            for (const value of cells) {
+                const td = document.createElement("td");
+                td.textContent = value;
+                tr.appendChild(td);
+            }
+
+            const bodyTd = document.createElement("td");
+            bodyTd.className = "broadcast-body-cell";
+            bodyTd.textContent = b.body;
+            tr.appendChild(bodyTd);
+
+            const statusTd = document.createElement("td");
+            const statusSpan = document.createElement("span");
+            statusSpan.className = "status status-" + b.status;
+            statusSpan.textContent = STATUS_LABELS[b.status] || b.status;
+            statusTd.appendChild(statusSpan);
+            tr.appendChild(statusTd);
+
+            const progressTd = document.createElement("td");
+            if (b.status === "draft") {
+                progressTd.textContent = "—";
+            } else {
+                progressTd.textContent =
+                    (b.sent + b.failed) + " / " + b.total +
+                    (b.failed ? " (ошибок: " + b.failed + ")" : "");
+            }
+            tr.appendChild(progressTd);
+
+            const actionsTd = document.createElement("td");
+            actionsTd.className = "broadcast-actions";
+            for (const [action, label] of ACTIONS[b.status] || []) {
+                const button = document.createElement("button");
+                button.textContent = label;
+                if (action === "cancel") {
+                    button.className = "delete-button";
+                }
+                button.addEventListener("click", () => runAction(b.id, action, label));
+                actionsTd.appendChild(button);
+            }
+            tr.appendChild(actionsTd);
+
+            tbody.appendChild(tr);
+        }
+    }
+
+    async function refresh() {
+        try {
+            const response = await fetch("/admin/broadcasts/data");
+            if (!response.ok) {
+                return;
+            }
+            const data = await response.json();
+            renderBroadcasts(data.broadcasts);
+        } catch (error) {
+            console.error(error);
+        }
+    }
+
+    async function runAction(id, action, label) {
+        if (action === "cancel" && !confirm("Отменить рассылку №" + id + "?")) {
+            return;
+        }
+        if (action === "start" && !confirm("Запустить рассылку №" + id + "?")) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/admin/broadcasts/${id}/${action}`, {
+                method: "POST",
+            });
+            if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                alert(data.detail || ("Не получилось: " + label));
+            }
+        } catch (error) {
+            console.error(error);
+            alert("Ошибка сети");
+        }
+        refresh();
+    }
+
+    document
+        .getElementById("broadcast-form")
+        .addEventListener("submit", async function (event) {
+            event.preventDefault();
+
+            const status = document.getElementById("status");
+            const bodyField = document.getElementById("broadcast-body");
+
+            status.textContent = "Создание...";
+
+            try {
+                const response = await fetch("/admin/broadcasts", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        body: bodyField.value,
+                        audience: document.getElementById("broadcast-audience").value,
+                    }),
+                });
+
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    throw new Error(data.detail || "Ошибка создания");
+                }
+
+                bodyField.value = "";
+                status.textContent = "Черновик создан";
+            } catch (error) {
+                console.error(error);
+                status.textContent = error.message || "Ошибка создания";
+            }
+            refresh();
+        });
+
+    renderBroadcasts({{ broadcasts | tojson }});
+    setInterval(refresh, 3000);
+</script>
+
+{% endblock %}

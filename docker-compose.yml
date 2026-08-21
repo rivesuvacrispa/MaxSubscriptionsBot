@@ -32,6 +32,16 @@ services:
     depends_on:
       - redis
 
+  broadcaster:
+    build:
+      context: .
+      dockerfile: broadcaster.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      - redis
+
   redis:
     image: redis:8-alpine
     restart: unless-stopped
