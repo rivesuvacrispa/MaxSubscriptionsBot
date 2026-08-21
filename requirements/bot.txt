@@ -1,5 +1,5 @@
-maxapi
-redis[hiredis]
-httpx[socks]
-python-dotenv
-pillow
+maxapi==1.2.2
+redis[hiredis]==8.1.0
+httpx[socks]==0.28.1
+python-dotenv==1.2.3
+pillow==12.3.0

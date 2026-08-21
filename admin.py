@@ -1,9 +1,13 @@
 import asyncio
+import csv
+import datetime
+import io
 import secrets
 import os
 import redis_storage
 from typing import Annotated
 from fastapi import Depends, FastAPI, HTTPException, status, Request, Body
+from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 
@@ -90,6 +94,45 @@ async def index(
             "total": total,
             "total_pages": total_pages,
         },
+    )
+
+
+@app.get("/admin/users/export", name="users-export")
+async def export_users(_: Annotated[str, Depends(basic_auth)]):
+    async def generate():
+        # BOM, чтобы Excel распознал UTF-8; разделитель ";" под русскую локаль
+        buffer = io.StringIO()
+        writer = csv.writer(buffer, delimiter=";")
+        buffer.write("\ufeff")
+        writer.writerow([
+            "ID чата",
+            "ID пользователя",
+            "Имя пользователя",
+            "Дата обновления",
+            "Статус",
+        ])
+
+        async for user in redis_storage.iter_all_users():
+            writer.writerow([
+                user["chat_id"],
+                user["user_id"],
+                user["username"],
+                user["date_updated"],
+                "Проверен" if user["status"] else "Не подписан / новый",
+            ])
+
+            if buffer.tell() > 64 * 1024:
+                yield buffer.getvalue()
+                buffer.seek(0)
+                buffer.truncate()
+
+        yield buffer.getvalue()
+
+    filename = f"participants_{datetime.date.today().isoformat()}.csv"
+    return StreamingResponse(
+        generate(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

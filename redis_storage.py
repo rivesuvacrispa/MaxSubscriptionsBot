@@ -65,6 +65,11 @@ async def get_user_count() -> int:
     return await redis_client.zcard("users:index")
 
 
+async def get_participant_count() -> int:
+    """Получить счетчик подтверждённых участников розыгрыша (status=True)."""
+    return await redis_client.scard("users:verified")
+
+
 async def get_users(
     page: int = 1,
     per_page: int = 50,
@@ -115,6 +120,43 @@ async def get_users(
     return users, total
 
 
+async def iter_all_users(batch_size: int = 500):
+    """Итерирует всех пользователей батчами (для выгрузки).
+
+    Формат пользователя такой же, как в get_users().
+    """
+    start = 0
+    while True:
+        user_ids = await redis_client.zrevrange(
+            "users:index",
+            start,
+            start + batch_size - 1,
+        )
+
+        if not user_ids:
+            return
+
+        async with redis_client.pipeline() as pipe:
+            for user_id in user_ids:
+                await pipe.hgetall(f"user:{user_id}")
+
+            results = await pipe.execute()
+
+        for user in results:
+            if not user:
+                continue
+
+            yield {
+                "chat_id": int(user.get("chat_id", 0)),
+                "user_id": int(user.get("user_id", 0)),
+                "username": user.get("username", ""),
+                "date_updated": user.get("date_updated", None),
+                "status": bool(int(user.get("status", 0))),
+            }
+
+        start += batch_size
+
+
 async def get_user_status(chat_id: int) -> bool:
     """Получить статус участия пользователя в розыгрыше."""
     status = await redis_client.hget(
@@ -150,6 +192,9 @@ async def save_user(chat_id: int, user_id: int, username: str | None, status: bo
             str(chat_id): date_updated.timestamp(),
         },
     )
+
+    if status:
+        await redis_client.sadd("users:verified", str(chat_id))
 
 
 async def set_welcome_message(message: str) -> None:

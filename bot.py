@@ -2,9 +2,9 @@ import asyncio
 import logging
 import os
 
-from maxapi import Bot, Dispatcher
+from maxapi import Bot, Dispatcher, F
 from maxapi.enums import ParseMode
-from maxapi.types import BotStarted, Command, MessageCreated, CallbackButton, MessageCallback
+from maxapi.types import BotStarted, CallbackButton, MessageCallback
 from maxapi.utils.inline_keyboard import InlineKeyboardBuilder
 import redis_storage
 
@@ -14,29 +14,16 @@ bot = Bot(os.getenv("BOT_TOKEN"))
 dp = Dispatcher()
 
 
-# Ответ бота при нажатии на кнопку "Начать"
+# Ответ бота при нажатии на кнопку "Начать": сразу список каналов и кнопка проверки
 @dp.bot_started()
 async def bot_started(event: BotStarted):
-    message = await redis_storage.get_welcome_message()
-    await event.bot.send_message(
-        chat_id=event.chat_id,
-        text=message
-    )
-
-
-# Ответ бота на команду /start
-@dp.message_created(Command('start'))
-async def hello(event: MessageCreated):
-    if event.chat.dialog_with_user is None:
-        return
-
     message = await redis_storage.get_start_message()
     channels = await redis_storage.get_channel_checklist()
-    username = f"{event.from_user.first_name} {event.from_user.last_name}"
+    username = " ".join(filter(None, [event.user.first_name, event.user.last_name]))
 
     await redis_storage.save_user(
-        chat_id=event.chat.chat_id,
-        user_id=event.chat.dialog_with_user.user_id,
+        chat_id=event.chat_id,
+        user_id=event.user.user_id,
         username=username,
         status=False
     )
@@ -45,19 +32,26 @@ async def hello(event: MessageCreated):
     for channel in channels:
         message += f"""\n#№{counter} - <a href="{channel.get('link')}">{channel.get('title')}</a>"""
 
+    participants = await redis_storage.get_participant_count()
+    if "{count}" in message:
+        message = message.replace("{count}", str(participants))
+    else:
+        message += f"\n\nУже участвуют: {participants}"
+
     builder = InlineKeyboardBuilder()
     builder.row(
         CallbackButton(text="Я подписался", payload="check-user"),
     )
-    await event.message.answer(
-        message,
+    await event.bot.send_message(
+        chat_id=event.chat_id,
+        text=message,
         attachments=[builder.as_markup()],
         parse_mode=ParseMode.HTML
     )
 
 
 # Обработчик нажатия на кнопку "Я подписался"
-@dp.message_callback('check-user')
+@dp.message_callback(F.callback.payload == 'check-user')
 async def check_user(callback: MessageCallback):
     if callback.chat.dialog_with_user is None:
         return

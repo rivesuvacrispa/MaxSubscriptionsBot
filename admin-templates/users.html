@@ -4,6 +4,7 @@
 
 <div class="users-info">
     Всего участников: {{ total }}
+    <a href="{{ url_for('users-export') }}" class="export-button">Выгрузить в CSV</a>
 </div>
 
 <table>
