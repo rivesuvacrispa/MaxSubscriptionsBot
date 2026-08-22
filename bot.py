@@ -40,6 +40,8 @@ async def bot_started(event: BotStarted):
     for channel in channels:
         message += f"""\n❌ - <a href="{channel.get('link')}">{channel.get('title')}</a>"""
 
+    message += "\n\nПосле подписки нажмите «✅ Я подписался», и мы проверим выполнение условий."
+
     participants = await redis_storage.get_participant_count()
     if "{count}" in message:
         message = message.replace("{count}", str(participants))
@@ -48,7 +50,7 @@ async def bot_started(event: BotStarted):
 
     builder = InlineKeyboardBuilder()
     builder.row(
-        CallbackButton(text="Я подписался", payload="check-user"),
+        CallbackButton(text="✅ Я подписался", payload="check-user"),
     )
     await event.bot.send_message(
         chat_id=event.chat_id,
