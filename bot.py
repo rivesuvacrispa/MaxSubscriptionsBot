@@ -23,6 +23,10 @@ dp = Dispatcher(use_create_task=True)
 # не выйти за лимиты MAX API; сверх лимита нажатия ждут своей очереди
 check_semaphore = asyncio.Semaphore(int(os.getenv("MAX_CONCURRENT_CHECKS", "64")))
 
+# кулдаун кнопки «Я подписался» на пользователя: повторные нажатия в течение
+# TTL молча игнорируются — защита от спама кнопкой и лишних вызовов MAX API
+CHECK_COOLDOWN = int(os.getenv("CHECK_COOLDOWN", "3"))
+
 # --- Prometheus-метрики (HTTP на METRICS_PORT внутри контейнера) ---
 EVENTS = Counter("bot_events_total", "Обработанные события бота", ["handler"])
 DURATION = Histogram(
@@ -160,6 +164,11 @@ async def check_user(callback: MessageCallback):
 
     user_id = callback.chat.dialog_with_user.user_id
     chat_id = callback.chat.chat_id
+
+    if not await redis_storage.try_acquire_check_cooldown(chat_id, CHECK_COOLDOWN):
+        CHECK_RESULTS.labels("cooldown").inc()
+        return
+
     user_status = await redis_storage.get_user_status(chat_id)
 
     if user_status:

@@ -288,6 +288,14 @@ async def set_user_status(chat_id: int, status: bool) -> None:
         await pipe.execute()
 
 
+async def try_acquire_check_cooldown(chat_id: int, ttl: int) -> bool:
+    """Кулдаун кнопки проверки подписки: True — нажатие можно обрабатывать,
+    False — с прошлого нажатия ещё не прошло ttl секунд."""
+    return bool(
+        await redis_client.set(f"check:cooldown:{chat_id}", "1", nx=True, ex=ttl)
+    )
+
+
 # Лок массовой перепроверки: TTL страхует от вечного лока при смерти процесса,
 # работающая проверка обязана периодически продлевать его refresh_recheck_lock.
 # Запас большой: один чанк при шторме ретраев API может идти несколько минут
