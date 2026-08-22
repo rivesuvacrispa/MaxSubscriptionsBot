@@ -7,10 +7,10 @@ import time
 from maxapi import Bot, Dispatcher, F
 from prometheus_client import Counter, Gauge, Histogram, start_http_server
 from maxapi.enums import ParseMode
-from maxapi.exceptions import MaxApiError
 from maxapi.types import BotStarted, CallbackButton, MessageCallback
 from maxapi.utils.inline_keyboard import InlineKeyboardBuilder
 import redis_storage
+import subscription_check
 
 logging.basicConfig(level=logging.INFO)
 
@@ -60,41 +60,15 @@ async def update_gauges():
         await asyncio.sleep(30)
 
 
-# число попыток и стартовая пауза ретрая при временных сбоях MAX API (429/5xx/сеть)
-CHECK_RETRIES = int(os.getenv("CHECK_RETRIES", "4"))
-CHECK_RETRY_DELAY = float(os.getenv("CHECK_RETRY_DELAY", "0.5"))
-
 # маркер «канал не удалось проверить» — отличаем от None (не подписан)
-_UNAVAILABLE = object()
+_UNAVAILABLE = subscription_check.UNAVAILABLE
 
 
 async def _get_member_with_retry(channel_id, user_id):
-    """Проверка подписки с ретраями.
-
-    Временные сбои API (429/5xx/сеть) ретраятся с экспоненциальной паузой;
-    если попытки исчерпаны — канал считается недоступным (в пользу пользователя),
-    чтобы юзер никогда не упирался в «попробуйте ещё раз».
-    403/404 — бот не админ канала, тоже недоступен.
-    """
-    delay = CHECK_RETRY_DELAY
-    for attempt in range(1, CHECK_RETRIES + 1):
-        try:
-            return await bot.get_chat_member(channel_id, user_id)
-        except MaxApiError as e:
-            if e.code in (403, 404):
-                logging.error(f"Нет доступа к каналу [{channel_id}]! Бот точно администратор? Ошибка:")
-                logging.error(e)
-                return _UNAVAILABLE
-            API_TRANSIENT_ERRORS.inc()
-            logging.warning(f"Временная ошибка API при проверке канала [{channel_id}], попытка {attempt}/{CHECK_RETRIES}: {e}")
-        except Exception as e:
-            API_TRANSIENT_ERRORS.inc()
-            logging.warning(f"Сбой при проверке канала [{channel_id}], попытка {attempt}/{CHECK_RETRIES}: {e!r}")
-        if attempt < CHECK_RETRIES:
-            await asyncio.sleep(delay)
-            delay *= 2
-    logging.error(f"Канал [{channel_id}] не удалось проверить за {CHECK_RETRIES} попыток — исключаем из требований")
-    return _UNAVAILABLE
+    return await subscription_check.get_member_with_retry(
+        bot, channel_id, user_id,
+        on_transient_error=API_TRANSIENT_ERRORS.inc,
+    )
 
 
 async def _build_checklist_message(verified: bool) -> str:

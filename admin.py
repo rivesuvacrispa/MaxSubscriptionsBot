@@ -2,15 +2,18 @@ import asyncio
 import csv
 import datetime
 import io
+import logging
 import secrets
 import os
 import pg_storage
 import redis_storage
+import subscription_check
 from typing import Annotated
 from fastapi import Depends, FastAPI, HTTPException, status, Request, Body
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
+from maxapi import Bot
 
 app = FastAPI()
 security = HTTPBasic()
@@ -119,16 +122,18 @@ async def export_users(_: Annotated[str, Depends(basic_auth)]):
             "ID пользователя",
             "Имя пользователя",
             "Дата обновления",
-            "Статус",
         ])
 
         async for user in redis_storage.iter_all_users():
+            # в выгрузку попадают только проверенные участники розыгрыша
+            if not user["status"]:
+                continue
+
             writer.writerow([
                 user["chat_id"],
                 user["user_id"],
                 user["username"],
                 user["date_updated"],
-                "Проверен" if user["status"] else "Не подписан / новый",
             ])
 
             if buffer.tell() > 64 * 1024:
@@ -138,12 +143,154 @@ async def export_users(_: Annotated[str, Depends(basic_auth)]):
 
         yield buffer.getvalue()
 
-    filename = f"participants_{datetime.date.today().isoformat()}.csv"
+    filename = f"participants_verified_{datetime.date.today().isoformat()}.csv"
     return StreamingResponse(
         generate(),
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# --- Массовая перепроверка подписок ---
+
+# сколько пользователей проверяется одновременно; держим ниже лимита бота,
+# чтобы перепроверка не мешала живым нажатиям «Я подписался»
+RECHECK_CONCURRENCY = int(os.getenv("RECHECK_CONCURRENCY", "8"))
+
+_recheck_bot: Bot | None = None
+# ссылка на текущую задачу, иначе create_task может быть собран GC
+_recheck_task: asyncio.Task | None = None
+
+
+def _get_recheck_bot() -> Bot:
+    global _recheck_bot
+    if _recheck_bot is None:
+        _recheck_bot = Bot(os.getenv("BOT_TOKEN"))
+    return _recheck_bot
+
+
+class _RecheckAborted(Exception):
+    pass
+
+
+async def _recheck_one(bot: Bot, chat_id: int, channels: list[dict]) -> str:
+    """Перепроверяет одного пользователя, возвращает итог для счётчиков."""
+    user = await redis_storage.get_user(chat_id)
+    if user is None:
+        return "skipped"  # удалён, пока шла проверка
+
+    unavailable = 0
+    missing = False
+    for channel in channels:
+        member = await subscription_check.get_member_with_retry(
+            bot, channel.get("id"), user["user_id"]
+        )
+
+        if member is subscription_check.UNAVAILABLE:
+            unavailable += 1
+            continue
+
+        if member is None:
+            missing = True
+            break
+
+    if unavailable == len(channels):
+        # API не ответил ни по одному каналу — проблема глобальная (бот не
+        # админ / токен), менять статусы по такой проверке нельзя
+        raise _RecheckAborted(
+            "Ни один канал недоступен для проверки. Добавьте бота администратором в каналы."
+        )
+
+    new_status = not missing
+    if new_status == user["status"]:
+        return "unchanged"
+
+    await redis_storage.set_user_status(chat_id, new_status)
+    return "promoted" if new_status else "demoted"
+
+
+async def _run_recheck() -> None:
+    progress = {
+        "status": "running",
+        "total": 0,
+        "done": 0,
+        "promoted": 0,
+        "demoted": 0,
+        "error": None,
+        "started_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "finished_at": None,
+    }
+
+    try:
+        channels = await redis_storage.get_channel_checklist()
+        if not channels:
+            raise _RecheckAborted("Нет включённых каналов — проверять нечего")
+
+        bot = _get_recheck_bot()
+        chat_ids = await redis_storage.get_all_user_chat_ids()
+        progress["total"] = len(chat_ids)
+        await redis_storage.set_recheck_progress(progress)
+
+        for i in range(0, len(chat_ids), RECHECK_CONCURRENCY):
+            chunk = chat_ids[i:i + RECHECK_CONCURRENCY]
+            results = await asyncio.gather(
+                *[_recheck_one(bot, chat_id, channels) for chat_id in chunk],
+                return_exceptions=True,
+            )
+
+            for result in results:
+                if isinstance(result, _RecheckAborted):
+                    raise result
+                if isinstance(result, BaseException):
+                    raise RuntimeError(f"Сбой проверки пользователя: {result!r}")
+                progress["done"] += 1
+                if result == "promoted":
+                    progress["promoted"] += 1
+                elif result == "demoted":
+                    progress["demoted"] += 1
+
+            await redis_storage.set_recheck_progress(progress)
+            await redis_storage.refresh_recheck_lock()
+
+        progress["status"] = "done"
+    except _RecheckAborted as e:
+        progress["status"] = "error"
+        progress["error"] = str(e)
+    except Exception as e:
+        logging.exception("Массовая перепроверка упала")
+        progress["status"] = "error"
+        progress["error"] = f"Внутренняя ошибка: {e!r}"
+    finally:
+        # порядок важен: сперва финальный прогресс, потом отпустить лок,
+        # иначе ручка статуса успеет увидеть running без лока и решить,
+        # что проверка прервана
+        progress["finished_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        await redis_storage.set_recheck_progress(progress)
+        await redis_storage.release_recheck_lock()
+
+
+@app.post("/admin/users/recheck")
+async def start_recheck(_: Annotated[str, Depends(basic_auth)] = None):
+    global _recheck_task
+    if not await redis_storage.try_acquire_recheck_lock():
+        raise HTTPException(status_code=409, detail="Проверка уже идёт")
+
+    _recheck_task = asyncio.create_task(_run_recheck())
+    return {"status": "ok"}
+
+
+@app.get("/admin/users/recheck/status")
+async def recheck_status(_: Annotated[str, Depends(basic_auth)] = None):
+    progress = await redis_storage.get_recheck_progress()
+    if progress is None:
+        return {"status": "idle"}
+
+    if progress["status"] == "running" and not await redis_storage.is_recheck_running():
+        # лок истёк, а прогресс завис в running — процесс админки умер посреди проверки
+        progress["status"] = "error"
+        progress["error"] = "Проверка прервана (админка перезапустилась). Запустите заново."
+
+    return progress
 
 
 # Допустимые исходные статусы для каждого целевого статуса ручек

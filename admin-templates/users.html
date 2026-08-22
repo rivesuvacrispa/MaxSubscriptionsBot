@@ -4,7 +4,11 @@
 
 <div class="users-info">
     Всего участников: {{ total }}
-    <a href="{{ url_for('users-export') }}" class="export-button">Выгрузить в CSV</a>
+    <a href="{{ url_for('users-export') }}" class="export-button">Выгрузить в CSV (только проверенные)</a>
+    <button type="button" id="recheck-button" class="export-button" onclick="startRecheck()">
+        🔄 Проверить подписки у всех
+    </button>
+    <span id="recheck-status"></span>
 </div>
 
 <table>
@@ -150,6 +154,94 @@
 {% endif %}
 
 <script>
+    const recheckButton = document.getElementById("recheck-button");
+    const recheckStatus = document.getElementById("recheck-status");
+    let recheckPollTimer = null;
+
+    async function startRecheck() {
+        if (!confirm("Проверить подписки у всех участников? Отписавшиеся потеряют статус «Проверен».")) {
+            return;
+        }
+
+        recheckButton.disabled = true;
+
+        try {
+            const response = await fetch("/admin/users/recheck", { method: "POST" });
+
+            if (response.status === 409) {
+                recheckStatus.textContent = "Проверка уже идёт…";
+                pollRecheck();
+                return;
+            }
+
+            if (!response.ok) {
+                throw new Error("Ошибка запуска");
+            }
+
+            recheckStatus.textContent = "Проверка запущена…";
+            pollRecheck();
+        } catch (error) {
+            console.error(error);
+            recheckButton.disabled = false;
+            alert("Не удалось запустить проверку");
+        }
+    }
+
+    function pollRecheck() {
+        if (recheckPollTimer) {
+            return;
+        }
+        recheckPollTimer = setInterval(updateRecheckStatus, 2000);
+        updateRecheckStatus();
+    }
+
+    async function updateRecheckStatus() {
+        let progress;
+        try {
+            const response = await fetch("/admin/users/recheck/status");
+            progress = await response.json();
+        } catch (error) {
+            console.error(error);
+            return; // временная сетевая ошибка — попробуем на следующем тике
+        }
+
+        if (progress.status === "running") {
+            recheckButton.disabled = true;
+            recheckStatus.textContent =
+                "Проверено " + progress.done + " из " + progress.total +
+                " (подтверждено +" + progress.promoted + ", снято −" + progress.demoted + ")…";
+            return;
+        }
+
+        clearInterval(recheckPollTimer);
+        recheckPollTimer = null;
+        recheckButton.disabled = false;
+
+        if (progress.status === "done") {
+            recheckStatus.textContent = "Готово: проверено " + progress.done +
+                ", подтверждено +" + progress.promoted + ", снято −" + progress.demoted + ". Обновляю…";
+            setTimeout(() => location.reload(), 1500);
+        } else if (progress.status === "error") {
+            recheckStatus.textContent = "Ошибка: " + (progress.error || "неизвестная");
+        } else {
+            recheckStatus.textContent = "";
+        }
+    }
+
+    // если проверку запустили раньше (или с другой вкладки) — сразу показываем прогресс
+    (async () => {
+        try {
+            const response = await fetch("/admin/users/recheck/status");
+            const progress = await response.json();
+            if (progress.status === "running") {
+                recheckStatus.textContent = "Проверка уже идёт…";
+                pollRecheck();
+            }
+        } catch (error) {
+            console.error(error);
+        }
+    })();
+
     async function deleteUser(chatId) {
         if (!confirm("Удалить пользователя " + chatId + "? Он пропадёт из базы и счётчика участников.")) {
             return;

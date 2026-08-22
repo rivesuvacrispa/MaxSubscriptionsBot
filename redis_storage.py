@@ -238,6 +238,89 @@ async def save_user(chat_id: int, user_id: int, username: str | None, status: bo
         await redis_client.sadd("users:verified", str(chat_id))
 
 
+async def get_user(chat_id: int) -> dict | None:
+    """Получить одного пользователя (формат как в get_users) или None."""
+    user = await redis_client.hgetall(f"user:{chat_id}")
+
+    if not user:
+        return None
+
+    return {
+        "chat_id": int(user.get("chat_id", 0)),
+        "user_id": int(user.get("user_id", 0)),
+        "username": user.get("username", ""),
+        "date_updated": user.get("date_updated", None),
+        "status": bool(int(user.get("status", 0))),
+    }
+
+
+async def get_all_user_chat_ids() -> list[int]:
+    """Снапшот chat_id всех пользователей.
+
+    Перепроверка идёт по зафиксированному списку: во время неё бот и сама
+    проверка двигают score в users:index, и постраничная итерация по нему
+    пропускала бы/дублировала пользователей.
+    """
+    chat_ids = await redis_client.zrevrange("users:index", 0, -1)
+    return [int(chat_id) for chat_id in chat_ids]
+
+
+async def set_user_status(chat_id: int, status: bool) -> None:
+    """Обновляет статус участия существующего пользователя (в обе стороны).
+
+    В отличие от save_user умеет и снимать статус: убирает из users:verified.
+    """
+    date_updated = datetime.datetime.now(datetime.timezone.utc)
+
+    async with redis_client.pipeline() as pipe:
+        await pipe.hset(
+            f"user:{chat_id}",
+            mapping={
+                "date_updated": date_updated.isoformat(),
+                "status": int(status),
+            },
+        )
+        await pipe.zadd("users:index", {str(chat_id): date_updated.timestamp()})
+        if status:
+            await pipe.sadd("users:verified", str(chat_id))
+        else:
+            await pipe.srem("users:verified", str(chat_id))
+        await pipe.execute()
+
+
+# Лок массовой перепроверки: TTL страхует от вечного лока при смерти процесса,
+# работающая проверка обязана периодически продлевать его refresh_recheck_lock.
+# Запас большой: один чанк при шторме ретраев API может идти несколько минут
+RECHECK_LOCK_TTL = 900
+
+
+async def try_acquire_recheck_lock() -> bool:
+    """Взять лок перепроверки. False — проверка уже идёт."""
+    return bool(await redis_client.set("recheck:lock", "1", nx=True, ex=RECHECK_LOCK_TTL))
+
+
+async def refresh_recheck_lock() -> None:
+    await redis_client.expire("recheck:lock", RECHECK_LOCK_TTL)
+
+
+async def release_recheck_lock() -> None:
+    await redis_client.delete("recheck:lock")
+
+
+async def is_recheck_running() -> bool:
+    return bool(await redis_client.exists("recheck:lock"))
+
+
+async def set_recheck_progress(progress: dict) -> None:
+    """Сохранить прогресс перепроверки (см. формат в admin.py)."""
+    await redis_client.set("recheck:progress", json.dumps(progress))
+
+
+async def get_recheck_progress() -> dict | None:
+    data = await redis_client.get("recheck:progress")
+    return json.loads(data) if data else None
+
+
 async def delete_user(chat_id: int) -> None:
     """Полностью удаляет пользователя из базы (хеш, индекс, счётчик участников)."""
     async with redis_client.pipeline() as pipe:
