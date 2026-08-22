@@ -25,7 +25,7 @@ check_semaphore = asyncio.Semaphore(int(os.getenv("MAX_CONCURRENT_CHECKS", "64")
 
 # кулдаун кнопки «Я подписался» на пользователя: повторные нажатия в течение
 # TTL молча игнорируются — защита от спама кнопкой и лишних вызовов MAX API
-CHECK_COOLDOWN = int(os.getenv("CHECK_COOLDOWN", "3"))
+CHECK_COOLDOWN = int(os.getenv("CHECK_COOLDOWN", "2"))
 
 # --- Prometheus-метрики (HTTP на METRICS_PORT внутри контейнера) ---
 EVENTS = Counter("bot_events_total", "Обработанные события бота", ["handler"])
