@@ -37,8 +37,8 @@ async def bot_started(event: BotStarted):
         status=False
     )
 
-    for counter, channel in enumerate(channels, start=1):
-        message += f"""\n№{counter} - <a href="{channel.get('link')}">{channel.get('title')}</a>"""
+    for channel in channels:
+        message += f"""\n❌ - <a href="{channel.get('link')}">{channel.get('title')}</a>"""
 
     participants = await redis_storage.get_participant_count()
     if "{count}" in message:
@@ -110,8 +110,8 @@ async def check_user(callback: MessageCallback):
 
     if missing:
         message = await redis_storage.get_fail_message()
-        for counter, channel in enumerate(missing, start=1):
-            message += f"""\n№{counter} - <a href="{channel.get('link')}">{channel.get('title')}</a>"""
+        for channel in missing:
+            message += f"""\n❌ - <a href="{channel.get('link')}">{channel.get('title')}</a>"""
         await callback.chat.send(message, parse_mode=ParseMode.HTML)
         return
 
