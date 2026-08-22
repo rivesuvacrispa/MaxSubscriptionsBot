@@ -303,7 +303,7 @@ BROADCAST_TRANSITIONS = {
     "cancelled": ["draft", "running", "paused"],
 }
 
-BROADCAST_AUDIENCES = ("all", "verified")
+BROADCAST_AUDIENCES = ("all", "verified", "single")
 
 
 def _serialize_broadcast(b: dict) -> dict:
@@ -313,6 +313,7 @@ def _serialize_broadcast(b: dict) -> dict:
     return {
         "id": b["id"],
         "audience": b["audience"],
+        "target_chat_id": b["target_chat_id"],
         "body": b["body"],
         "status": b["status"],
         "total": b["total"],
@@ -356,7 +357,17 @@ async def create_broadcast(
     if not body:
         raise HTTPException(status_code=400, detail="Текст рассылки не может быть пустым")
 
-    broadcast_id = await pg_storage.create_broadcast(audience, body)
+    target_chat_id = None
+    if audience == "single":
+        raw_target = str(payload.get("target_chat_id") or "").strip()
+        if not raw_target.isdigit():
+            raise HTTPException(
+                status_code=400,
+                detail="Для тестовой отправки укажите числовой ID пользователя",
+            )
+        target_chat_id = int(raw_target)
+
+    broadcast_id = await pg_storage.create_broadcast(audience, body, target_chat_id)
     return {"status": "ok", "id": broadcast_id}
 
 

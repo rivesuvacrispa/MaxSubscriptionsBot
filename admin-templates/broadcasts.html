@@ -7,6 +7,8 @@
     Поддерживаются HTML-теги, см
     <a href="https://dev.max.ru/docs-api#HTML">документацию MAX</a>.
     Состав получателей фиксируется в момент запуска рассылки.
+    Для проверки текста перед массовой отправкой выберите аудиторию
+    «Один пользователь (тест)» и укажите свой Chat ID.
 </div>
 <br>
 
@@ -21,7 +23,14 @@
         <select id="broadcast-audience" name="audience">
             <option value="all">Все, кто запускал бота</option>
             <option value="verified">Только подтверждённые участники</option>
+            <option value="single">Один пользователь (тест)</option>
         </select>
+    </div>
+
+    <div class="message-field" id="target-chat-field" hidden>
+        <label for="broadcast-target">Chat ID получателя</label>
+        <input type="text" id="broadcast-target" name="target_chat_id"
+               inputmode="numeric" placeholder="Chat ID со страницы «Пользователи»">
     </div>
 
     <div class="actions">
@@ -49,7 +58,8 @@
 </table>
 
 <style>
-    #broadcast-audience {
+    #broadcast-audience,
+    #broadcast-target {
         padding: 6px;
         font-size: 14px;
     }
@@ -84,7 +94,15 @@
     const AUDIENCE_LABELS = {
         all: "Все",
         verified: "Подтверждённые",
+        single: "Тест",
     };
+
+    function audienceLabel(b) {
+        if (b.audience === "single") {
+            return "Тест → " + b.target_chat_id;
+        }
+        return AUDIENCE_LABELS[b.audience] || b.audience;
+    }
 
     // какие действия доступны в каждом статусе
     const ACTIONS = {
@@ -105,7 +123,7 @@
             const cells = [
                 b.id,
                 b.created_at ? new Date(b.created_at).toLocaleString("ru-RU") : "",
-                AUDIENCE_LABELS[b.audience] || b.audience,
+                audienceLabel(b),
             ];
             for (const value of cells) {
                 const td = document.createElement("td");
@@ -188,6 +206,13 @@
         refresh();
     }
 
+    const audienceSelect = document.getElementById("broadcast-audience");
+    const targetField = document.getElementById("target-chat-field");
+
+    audienceSelect.addEventListener("change", function () {
+        targetField.hidden = audienceSelect.value !== "single";
+    });
+
     document
         .getElementById("broadcast-form")
         .addEventListener("submit", async function (event) {
@@ -199,13 +224,19 @@
             status.textContent = "Создание...";
 
             try {
+                const payload = {
+                    body: bodyField.value,
+                    audience: audienceSelect.value,
+                };
+                if (audienceSelect.value === "single") {
+                    payload.target_chat_id =
+                        document.getElementById("broadcast-target").value.trim();
+                }
+
                 const response = await fetch("/admin/broadcasts", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        body: bodyField.value,
-                        audience: document.getElementById("broadcast-audience").value,
-                    }),
+                    body: JSON.stringify(payload),
                 });
 
                 if (!response.ok) {

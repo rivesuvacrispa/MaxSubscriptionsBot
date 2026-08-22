@@ -33,7 +33,8 @@ _DDL_LOCK_KEY = 0x6D617862
 DDL = """
 CREATE TABLE IF NOT EXISTS broadcasts (
     id BIGSERIAL PRIMARY KEY,
-    audience TEXT NOT NULL CHECK (audience IN ('all', 'verified')),
+    audience TEXT NOT NULL CHECK (audience IN ('all', 'verified', 'single')),
+    target_chat_id BIGINT,
     body TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'draft'
         CHECK (status IN ('draft', 'running', 'paused', 'cancelled', 'done')),
@@ -57,6 +58,16 @@ CREATE TABLE IF NOT EXISTS broadcast_deliveries (
 CREATE INDEX IF NOT EXISTS broadcast_deliveries_active_idx
     ON broadcast_deliveries (broadcast_id, chat_id)
     WHERE status IN ('pending', 'sending');
+
+-- миграция существующей таблицы: аудитория 'single' (тестовая отправка
+-- одному пользователю) + её обязательный target_chat_id. DROP+ADD
+-- идемпотентны и выполняются под advisory-локом при каждом старте.
+ALTER TABLE broadcasts ADD COLUMN IF NOT EXISTS target_chat_id BIGINT;
+ALTER TABLE broadcasts DROP CONSTRAINT IF EXISTS broadcasts_audience_check;
+ALTER TABLE broadcasts ADD CONSTRAINT broadcasts_audience_check CHECK (
+    audience IN ('all', 'verified', 'single')
+    AND (audience <> 'single' OR target_chat_id IS NOT NULL)
+);
 """
 
 
@@ -119,17 +130,27 @@ def _row_to_dict(row: asyncpg.Record) -> dict:
 
 
 BROADCAST_FIELDS = (
-    "id, audience, body, status, total, sent, failed, "
+    "id, audience, target_chat_id, body, status, total, sent, failed, "
     "created_at, started_at, finished_at"
 )
 
 
-async def create_broadcast(audience: str, body: str) -> int:
-    """Создаёт рассылку в статусе draft, возвращает её id."""
+async def create_broadcast(
+    audience: str, body: str, target_chat_id: int | None = None
+) -> int:
+    """Создаёт рассылку в статусе draft, возвращает её id.
+
+    target_chat_id задаётся только для audience='single' — тестовая отправка
+    одному пользователю.
+    """
     pool = await get_pool()
     return await pool.fetchval(
-        "INSERT INTO broadcasts (audience, body) VALUES ($1, $2) RETURNING id",
+        """
+        INSERT INTO broadcasts (audience, target_chat_id, body)
+        VALUES ($1, $2, $3) RETURNING id
+        """,
         audience,
+        target_chat_id,
         body,
     )
 
@@ -162,7 +183,10 @@ async def start_broadcast(broadcast_id: int) -> None:
     async with pool.acquire() as conn:
         async with conn.transaction():
             row = await conn.fetchrow(
-                "SELECT audience, status FROM broadcasts WHERE id = $1 FOR UPDATE",
+                """
+                SELECT audience, target_chat_id, status
+                FROM broadcasts WHERE id = $1 FOR UPDATE
+                """,
                 broadcast_id,
             )
             if row is None:
@@ -180,15 +204,22 @@ async def start_broadcast(broadcast_id: int) -> None:
             if status != "draft":
                 raise BroadcastNotStartable(status)
 
-            verified_only = row["audience"] == "verified"
-            batch: list[tuple[int, int]] = []
-            async for chat_id in redis_storage.iter_chat_ids(verified_only):
-                batch.append((broadcast_id, chat_id))
-                if len(batch) >= SNAPSHOT_BATCH:
+            if row["audience"] == "single":
+                # тестовая отправка: единственный получатель задан явно,
+                # снапшот из Redis не снимается
+                await _insert_deliveries(
+                    conn, [(broadcast_id, row["target_chat_id"])]
+                )
+            else:
+                verified_only = row["audience"] == "verified"
+                batch: list[tuple[int, int]] = []
+                async for chat_id in redis_storage.iter_chat_ids(verified_only):
+                    batch.append((broadcast_id, chat_id))
+                    if len(batch) >= SNAPSHOT_BATCH:
+                        await _insert_deliveries(conn, batch)
+                        batch = []
+                if batch:
                     await _insert_deliveries(conn, batch)
-                    batch = []
-            if batch:
-                await _insert_deliveries(conn, batch)
 
             await conn.execute(
                 """
