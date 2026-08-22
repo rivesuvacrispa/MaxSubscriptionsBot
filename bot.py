@@ -1,8 +1,11 @@
 import asyncio
+import functools
 import logging
 import os
+import time
 
 from maxapi import Bot, Dispatcher, F
+from prometheus_client import Counter, Gauge, Histogram, start_http_server
 from maxapi.enums import ParseMode
 from maxapi.exceptions import MaxApiError
 from maxapi.types import BotStarted, CallbackButton, MessageCallback
@@ -19,6 +22,43 @@ dp = Dispatcher(use_create_task=True)
 # ограничивает число одновременных проверок подписки, чтобы при наплыве
 # не выйти за лимиты MAX API; сверх лимита нажатия ждут своей очереди
 check_semaphore = asyncio.Semaphore(int(os.getenv("MAX_CONCURRENT_CHECKS", "64")))
+
+# --- Prometheus-метрики (HTTP на METRICS_PORT внутри контейнера) ---
+EVENTS = Counter("bot_events_total", "Обработанные события бота", ["handler"])
+DURATION = Histogram(
+    "bot_handler_seconds", "Время обработки события ботом", ["handler"],
+    buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30),
+)
+CHECK_RESULTS = Counter("bot_check_results_total", "Итоги проверки подписки", ["result"])
+API_TRANSIENT_ERRORS = Counter("bot_api_transient_errors_total", "Временные ошибки MAX API (429/5xx/сеть)")
+PARTICIPANTS = Gauge("bot_participants", "Подтверждённые участники (реальные, без накрутки)")
+USERS_KNOWN = Gauge("bot_users_known", "Все юзеры, известные боту")
+
+
+def instrumented(handler_name):
+    """Счётчик событий + гистограмма времени обработки для хендлера."""
+    def wrap(func):
+        @functools.wraps(func)
+        async def inner(event):
+            EVENTS.labels(handler_name).inc()
+            start = time.monotonic()
+            try:
+                return await func(event)
+            finally:
+                DURATION.labels(handler_name).observe(time.monotonic() - start)
+        return inner
+    return wrap
+
+
+async def update_gauges():
+    while True:
+        try:
+            PARTICIPANTS.set(await redis_storage.redis_client.scard("users:verified"))
+            USERS_KNOWN.set(await redis_storage.redis_client.zcard("users:index"))
+        except Exception as e:
+            logging.warning(f"Не удалось обновить gauge-метрики: {e!r}")
+        await asyncio.sleep(30)
+
 
 # число попыток и стартовая пауза ретрая при временных сбоях MAX API (429/5xx/сеть)
 CHECK_RETRIES = int(os.getenv("CHECK_RETRIES", "4"))
@@ -45,8 +85,10 @@ async def _get_member_with_retry(channel_id, user_id):
                 logging.error(f"Нет доступа к каналу [{channel_id}]! Бот точно администратор? Ошибка:")
                 logging.error(e)
                 return _UNAVAILABLE
+            API_TRANSIENT_ERRORS.inc()
             logging.warning(f"Временная ошибка API при проверке канала [{channel_id}], попытка {attempt}/{CHECK_RETRIES}: {e}")
         except Exception as e:
+            API_TRANSIENT_ERRORS.inc()
             logging.warning(f"Сбой при проверке канала [{channel_id}], попытка {attempt}/{CHECK_RETRIES}: {e!r}")
         if attempt < CHECK_RETRIES:
             await asyncio.sleep(delay)
@@ -57,6 +99,7 @@ async def _get_member_with_retry(channel_id, user_id):
 
 # Ответ бота при нажатии на кнопку "Начать": сразу список каналов и кнопка проверки
 @dp.bot_started()
+@instrumented("bot_started")
 async def bot_started(event: BotStarted):
     message = await redis_storage.get_start_message()
     channels = await redis_storage.get_channel_checklist()
@@ -94,6 +137,7 @@ async def bot_started(event: BotStarted):
 
 # Обработчик нажатия на кнопку "Я подписался"
 @dp.message_callback(F.callback.payload == 'check-user')
+@instrumented("check_user")
 async def check_user(callback: MessageCallback):
     if callback.chat.dialog_with_user is None:
         return
@@ -103,6 +147,7 @@ async def check_user(callback: MessageCallback):
     user_status = await redis_storage.get_user_status(chat_id)
 
     if user_status:
+        CHECK_RESULTS.labels("already_verified").inc()
         message = await redis_storage.get_success_message()
         await callback.chat.send(message, parse_mode=ParseMode.HTML)
         return
@@ -125,12 +170,14 @@ async def check_user(callback: MessageCallback):
     if channels and unavailable == len(channels):
         # не удалось проверить ни один канал — не засчитываем участие,
         # иначе при неподключённом боте проверку пройдут все подряд
+        CHECK_RESULTS.labels("all_unavailable").inc()
         logging.error("Ни один канал недоступен для проверки, участие не засчитано. Добавьте бота администратором в каналы.")
         message = await redis_storage.get_fail_message()
         await callback.chat.send(message, parse_mode=ParseMode.HTML)
         return
 
     if missing:
+        CHECK_RESULTS.labels("missing").inc()
         message = await redis_storage.get_fail_message()
         for channel in missing:
             message += f"""\n❌ - <a href="{channel.get('link')}">{channel.get('title')}</a>"""
@@ -146,11 +193,14 @@ async def check_user(callback: MessageCallback):
         username=username,
         status=True
     )
+    CHECK_RESULTS.labels("success").inc()
     message = await redis_storage.get_success_message()
     await callback.chat.send(message, parse_mode=ParseMode.HTML)
 
 
 async def main():
+    start_http_server(int(os.getenv("METRICS_PORT", "9114")))
+    asyncio.create_task(update_gauges())
     await dp.start_polling(bot)
 
 

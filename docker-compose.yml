@@ -9,6 +9,9 @@ services:
       - .env
     depends_on:
       - redis
+    ports:
+      # Prometheus-метрики бота; наружу отдаёт nginx на :9114 (под nft mon-filter)
+      - "127.0.0.1:9115:9114"
 
   admin:
     build:
