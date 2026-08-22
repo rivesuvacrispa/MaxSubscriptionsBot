@@ -97,25 +97,23 @@ async def _get_member_with_retry(channel_id, user_id):
     return _UNAVAILABLE
 
 
-# Ответ бота при нажатии на кнопку "Начать": сразу список каналов и кнопка проверки
-@dp.bot_started()
-@instrumented("bot_started")
-async def bot_started(event: BotStarted):
+async def _build_checklist_message(verified: bool) -> str:
+    """Стартовое сообщение со списком каналов.
+
+    Для подтверждённого участника каналы помечаются ✅ и подсказка про кнопку
+    заменяется на подтверждение участия — кнопка ему больше не нужна.
+    """
     message = await redis_storage.get_start_message()
     channels = await redis_storage.get_channel_checklist()
-    username = " ".join(filter(None, [event.user.first_name, event.user.last_name]))
 
-    await redis_storage.save_user(
-        chat_id=event.chat_id,
-        user_id=event.user.user_id,
-        username=username,
-        status=False
-    )
-
+    mark = "✅" if verified else "❌"
     for channel in channels:
-        message += f"""\n❌ - <a href="{channel.get('link')}">{channel.get('title')}</a>"""
+        message += f"""\n{mark} - <a href="{channel.get('link')}">{channel.get('title')}</a>"""
 
-    message += "\n\nПосле подписки нажмите «✅ Я подписался», и мы проверим выполнение условий."
+    if verified:
+        message += "\n\nВсе условия выполнены — вы участвуете в розыгрыше!"
+    else:
+        message += "\n\nПосле подписки нажмите «✅ Я подписался», и мы проверим выполнение условий."
 
     participants = await redis_storage.get_participant_count()
     if "{count}" in message:
@@ -123,14 +121,58 @@ async def bot_started(event: BotStarted):
     else:
         message += f"\n\nУже участвуют: {participants}"
 
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        CallbackButton(text="✅ Я подписался", payload="check-user"),
+    return message
+
+
+async def _hide_check_button(callback: MessageCallback):
+    """Перерисовывает стартовое сообщение подтверждённого участника: ✅ вместо ❌ и без кнопки.
+
+    edit_message без attachments шлёт пустой список вложений — клавиатура снимается.
+    """
+    original = callback.message
+    if original is None:
+        return
+    try:
+        text = await _build_checklist_message(verified=True)
+        await bot.edit_message(
+            message_id=original.body.mid,
+            text=text,
+            parse_mode=ParseMode.HTML,
+        )
+    except Exception as e:
+        logging.warning(f"Не удалось убрать кнопку проверки: {e!r}")
+
+
+# Ответ бота при нажатии на кнопку "Начать": сразу список каналов и кнопка проверки
+@dp.bot_started()
+@instrumented("bot_started")
+async def bot_started(event: BotStarted):
+    username = " ".join(filter(None, [event.user.first_name, event.user.last_name]))
+
+    # повторный «Старт» не должен сбрасывать уже подтверждённое участие
+    verified = await redis_storage.get_user_status(event.chat_id)
+
+    await redis_storage.save_user(
+        chat_id=event.chat_id,
+        user_id=event.user.user_id,
+        username=username,
+        status=verified
     )
+
+    message = await _build_checklist_message(verified=verified)
+
+    attachments = None
+    if not verified:
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            CallbackButton(text="✅ Я подписался", payload="check-user"),
+        )
+        attachments = [builder.as_markup()]
+
     await event.bot.send_message(
         chat_id=event.chat_id,
         text=message,
-        attachments=[builder.as_markup()],
+        attachments=attachments,
         parse_mode=ParseMode.HTML
     )
 
@@ -148,6 +190,7 @@ async def check_user(callback: MessageCallback):
 
     if user_status:
         CHECK_RESULTS.labels("already_verified").inc()
+        await _hide_check_button(callback)
         message = await redis_storage.get_success_message()
         await callback.chat.send(message, parse_mode=ParseMode.HTML)
         return
@@ -194,6 +237,7 @@ async def check_user(callback: MessageCallback):
         status=True
     )
     CHECK_RESULTS.labels("success").inc()
+    await _hide_check_button(callback)
     message = await redis_storage.get_success_message()
     await callback.chat.send(message, parse_mode=ParseMode.HTML)
 
