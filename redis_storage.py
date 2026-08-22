@@ -72,8 +72,14 @@ async def get_user_count() -> int:
 
 
 async def get_participant_count() -> int:
-    """Получить счетчик подтверждённых участников розыгрыша (status=True)."""
-    return await redis_client.scard("users:verified")
+    """Получить счетчик подтверждённых участников розыгрыша (status=True).
+
+    К реальному числу прибавляется смещение из ключа participants:offset
+    (только отображение; в рассылки/снепшоты фейковые участники не попадают).
+    """
+    real = await redis_client.scard("users:verified")
+    offset = await redis_client.get("participants:offset")
+    return real + int(offset or 0)
 
 
 async def get_users(
