@@ -38,6 +38,8 @@ tokens = math.min(capacity, tokens + (now - ts) * rate)
 local wait = 0
 if tokens >= 1 then
   tokens = tokens - 1
+  -- сквозной счётчик реально выпущенных запросов к MAX API (для метрики rps)
+  redis.call('INCR', 'maxapi:requests')
 else
   wait = (1 - tokens) / rate
 end

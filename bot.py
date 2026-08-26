@@ -39,6 +39,8 @@ API_TRANSIENT_ERRORS = Counter("bot_api_transient_errors_total", "Временн
 HANDLER_ERRORS = Counter("bot_handler_errors_total", "Исключения в хендлерах (фейлы отправки и пр.)", ["handler"])
 PARTICIPANTS = Gauge("bot_participants", "Подтверждённые участники (реальные, без накрутки)")
 USERS_KNOWN = Gauge("bot_users_known", "Все юзеры, известные боту")
+# монотонный счётчик из Redis (общий лимитер всех сервисов) — в Grafana берётся rate()
+MAX_API_REQUESTS = Gauge("max_api_requests_total", "Запросы к MAX API всех сервисов (из общего лимитера)")
 
 
 def instrumented(handler_name):
@@ -65,6 +67,7 @@ async def update_gauges():
         try:
             PARTICIPANTS.set(await redis_storage.redis_client.scard("users:verified"))
             USERS_KNOWN.set(await redis_storage.redis_client.zcard("users:index"))
+            MAX_API_REQUESTS.set(int(await redis_storage.redis_client.get("maxapi:requests") or 0))
         except Exception as e:
             logging.warning(f"Не удалось обновить gauge-метрики: {e!r}")
         await asyncio.sleep(30)
