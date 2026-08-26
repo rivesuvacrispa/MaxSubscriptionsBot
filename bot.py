@@ -35,6 +35,7 @@ DURATION = Histogram(
 )
 CHECK_RESULTS = Counter("bot_check_results_total", "Итоги проверки подписки", ["result"])
 API_TRANSIENT_ERRORS = Counter("bot_api_transient_errors_total", "Временные ошибки MAX API (429/5xx/сеть)")
+HANDLER_ERRORS = Counter("bot_handler_errors_total", "Исключения в хендлерах (фейлы отправки и пр.)", ["handler"])
 PARTICIPANTS = Gauge("bot_participants", "Подтверждённые участники (реальные, без накрутки)")
 USERS_KNOWN = Gauge("bot_users_known", "Все юзеры, известные боту")
 
@@ -42,12 +43,16 @@ USERS_KNOWN = Gauge("bot_users_known", "Все юзеры, известные б
 def instrumented(handler_name):
     """Счётчик событий + гистограмма времени обработки для хендлера."""
     def wrap(func):
+        HANDLER_ERRORS.labels(handler_name)  # серия видна с 0, не с первой ошибки
         @functools.wraps(func)
         async def inner(event):
             EVENTS.labels(handler_name).inc()
             start = time.monotonic()
             try:
                 return await func(event)
+            except Exception:
+                HANDLER_ERRORS.labels(handler_name).inc()
+                raise
             finally:
                 DURATION.labels(handler_name).observe(time.monotonic() - start)
         return inner
