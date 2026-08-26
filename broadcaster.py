@@ -17,6 +17,7 @@ from maxapi.enums import ParseMode
 from maxapi.exceptions import MaxApiError
 
 import pg_storage
+import rate_limit
 
 logging.basicConfig(level=logging.INFO)
 
@@ -27,7 +28,7 @@ STALE_SECONDS = 60.0
 # троттлинг отправки, сообщений в секунду
 RATE = float(os.getenv("BROADCAST_RATE", "20"))
 
-bot = Bot(os.getenv("BOT_TOKEN"))
+bot = rate_limit.throttle_bot(Bot(os.getenv("BOT_TOKEN")))
 
 
 def is_terminal_error(e: MaxApiError) -> bool:

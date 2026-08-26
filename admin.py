@@ -6,6 +6,7 @@ import logging
 import secrets
 import os
 import pg_storage
+import rate_limit
 import redis_storage
 import subscription_check
 from typing import Annotated
@@ -156,6 +157,9 @@ async def export_users(_: Annotated[str, Depends(basic_auth)]):
 # сколько пользователей проверяется одновременно; держим ниже лимита бота,
 # чтобы перепроверка не мешала живым нажатиям «Я подписался»
 RECHECK_CONCURRENCY = int(os.getenv("RECHECK_CONCURRENCY", "8"))
+# пауза между чанками перепроверки: не даём фоновой перепроверке выедать
+# общий лимит MAX API у живых нажатий кнопки в боте
+RECHECK_CHUNK_PAUSE = float(os.getenv("RECHECK_CHUNK_PAUSE", "1.0"))
 
 _recheck_bot: Bot | None = None
 # ссылка на текущую задачу, иначе create_task может быть собран GC
@@ -165,7 +169,7 @@ _recheck_task: asyncio.Task | None = None
 def _get_recheck_bot() -> Bot:
     global _recheck_bot
     if _recheck_bot is None:
-        _recheck_bot = Bot(os.getenv("BOT_TOKEN"))
+        _recheck_bot = rate_limit.throttle_bot(Bot(os.getenv("BOT_TOKEN")))
     return _recheck_bot
 
 
@@ -251,6 +255,7 @@ async def _run_recheck() -> None:
 
             await redis_storage.set_recheck_progress(progress)
             await redis_storage.refresh_recheck_lock()
+            await asyncio.sleep(RECHECK_CHUNK_PAUSE)
 
         progress["status"] = "done"
     except _RecheckAborted as e:

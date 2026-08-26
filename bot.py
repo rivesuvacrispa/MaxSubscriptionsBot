@@ -9,12 +9,13 @@ from prometheus_client import Counter, Gauge, Histogram, start_http_server
 from maxapi.enums import ParseMode
 from maxapi.types import BotStarted, CallbackButton, MessageCallback
 from maxapi.utils.inline_keyboard import InlineKeyboardBuilder
+import rate_limit
 import redis_storage
 import subscription_check
 
 logging.basicConfig(level=logging.INFO)
 
-bot = Bot(os.getenv("BOT_TOKEN"))
+bot = rate_limit.throttle_bot(Bot(os.getenv("BOT_TOKEN")))
 # use_create_task=True: события обрабатываются параллельно; дефолтный
 # последовательный режим давал ~6 нажатий/с — очередь встаёт при наплыве
 dp = Dispatcher(use_create_task=True)
