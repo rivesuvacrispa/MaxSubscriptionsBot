@@ -134,6 +134,9 @@ async def _hide_check_button(callback: MessageCallback):
 @dp.bot_started()
 @instrumented("bot_started")
 async def bot_started(event: BotStarted):
+    if await redis_storage.is_bot_stopped():
+        return
+
     username = " ".join(filter(None, [event.user.first_name, event.user.last_name]))
 
     # повторный «Старт» не должен сбрасывать уже подтверждённое участие
@@ -173,6 +176,10 @@ async def check_user(callback: MessageCallback):
 
     user_id = callback.chat.dialog_with_user.user_id
     chat_id = callback.chat.chat_id
+
+    if await redis_storage.is_bot_stopped():
+        CHECK_RESULTS.labels("bot_stopped").inc()
+        return
 
     if not await redis_storage.try_acquire_check_cooldown(chat_id, CHECK_COOLDOWN):
         CHECK_RESULTS.labels("cooldown").inc()

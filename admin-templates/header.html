@@ -27,8 +27,51 @@
         >
             Рассылки
         </a>
+
+        <div class="bot-state">
+            <span id="bot-state-label">…</span>
+            <button id="bot-state-toggle" disabled>…</button>
+        </div>
     </nav>
 </header>
+
+<script>
+    (function () {
+        const label = document.getElementById("bot-state-label");
+        const button = document.getElementById("bot-state-toggle");
+
+        function render(stopped) {
+            label.textContent = stopped ? "🔴 Бот остановлен" : "🟢 Бот работает";
+            button.textContent = stopped ? "Включить" : "Остановить";
+            button.className = stopped ? "start" : "stop";
+            button.disabled = false;
+            button.dataset.stopped = stopped ? "1" : "";
+        }
+
+        async function load() {
+            const response = await fetch("/admin/bot-state");
+            render((await response.json()).stopped);
+        }
+
+        button.addEventListener("click", async () => {
+            const stop = !button.dataset.stopped;
+            const question = stop
+                ? "Остановить бота? Он перестанет отвечать пользователям, рассылки встанут на паузу."
+                : "Включить бота?";
+            if (!confirm(question)) return;
+
+            button.disabled = true;
+            const response = await fetch("/admin/bot-state", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ stopped: stop }),
+            });
+            render((await response.json()).stopped);
+        });
+
+        load();
+    })();
+</script>
 
 <style>
     .admin-header {
@@ -55,5 +98,36 @@
     .admin-nav a.active {
         border-bottom-color: #333;
         font-weight: bold;
+    }
+
+    .bot-state {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 6px 0;
+    }
+
+    .bot-state button {
+        padding: 6px 14px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        background: #fff;
+        cursor: pointer;
+    }
+
+    .bot-state button.stop {
+        border-color: #c0392b;
+        color: #c0392b;
+    }
+
+    .bot-state button.start {
+        border-color: #27ae60;
+        color: #27ae60;
+    }
+
+    .bot-state button:disabled {
+        opacity: 0.5;
+        cursor: default;
     }
 </style>

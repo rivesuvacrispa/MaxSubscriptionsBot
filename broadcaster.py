@@ -18,6 +18,7 @@ from maxapi.exceptions import MaxApiError
 
 import pg_storage
 import rate_limit
+import redis_storage
 
 logging.basicConfig(level=logging.INFO)
 
@@ -77,6 +78,11 @@ async def run() -> None:
     logging.info("Воркер рассылок запущен: батч %s, %s сообщ/с", CLAIM_BATCH, RATE)
     while True:
         try:
+            if await redis_storage.is_bot_stopped():
+                # глобальный рубильник из админки: доставки не клеймим, ждём
+                await asyncio.sleep(IDLE_SLEEP)
+                continue
+
             requeued = await pg_storage.requeue_stale_sending(STALE_SECONDS)
             if requeued:
                 logging.info("Возвращено зависших доставок: %s", requeued)

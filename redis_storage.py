@@ -288,6 +288,18 @@ async def set_user_status(chat_id: int, status: bool) -> None:
         await pipe.execute()
 
 
+async def is_bot_stopped() -> bool:
+    """Глобальный рубильник из админки: бот молчит, рассылки стоят."""
+    return bool(await redis_client.exists("bot:stopped"))
+
+
+async def set_bot_stopped(stopped: bool) -> None:
+    if stopped:
+        await redis_client.set("bot:stopped", "1")
+    else:
+        await redis_client.delete("bot:stopped")
+
+
 async def try_acquire_check_cooldown(chat_id: int, ttl: int) -> bool:
     """Кулдаун кнопки проверки подписки: True — нажатие можно обрабатывать,
     False — с прошлого нажатия ещё не прошло ttl секунд."""

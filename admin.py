@@ -274,6 +274,22 @@ async def _run_recheck() -> None:
         await redis_storage.release_recheck_lock()
 
 
+@app.get("/admin/bot-state")
+async def get_bot_state(_: Annotated[str, Depends(basic_auth)] = None):
+    return {"stopped": await redis_storage.is_bot_stopped()}
+
+
+@app.post("/admin/bot-state")
+async def set_bot_state(
+    payload: dict = Body(...),
+    _: Annotated[str, Depends(basic_auth)] = None,
+):
+    stopped = bool(payload.get("stopped"))
+    await redis_storage.set_bot_stopped(stopped)
+    logging.warning("Бот %s из админки", "ОСТАНОВЛЕН" if stopped else "включён")
+    return {"stopped": stopped}
+
+
 @app.post("/admin/users/recheck")
 async def start_recheck(_: Annotated[str, Depends(basic_auth)] = None):
     global _recheck_task
