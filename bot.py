@@ -3,6 +3,7 @@ import functools
 import logging
 import os
 import time
+from urllib.parse import urlparse
 
 from maxapi import Bot, Dispatcher, F
 from prometheus_client import Counter, Gauge, Histogram, start_http_server
@@ -241,10 +242,44 @@ async def check_user(callback: MessageCallback):
     await callback.chat.send(message, parse_mode=ParseMode.HTML)
 
 
+async def _ensure_webhook_subscription(url: str, secret: str | None) -> None:
+    """Приводит подписки MAX к единственной — нашему URL.
+
+    Пауза — чтобы aiohttp-сервер вебхука успел подняться до того, как MAX
+    начнёт слать события. Переподписываемся всегда: так подхватывается и
+    смена секрета (у существующей подписки его не проверить).
+    """
+    await asyncio.sleep(2)
+    try:
+        subs = (await bot.get_subscriptions()).subscriptions or []
+        for sub in subs:
+            await bot.unsubscribe_webhook(sub.url)
+            logging.info(f"Снята подписка вебхука: {sub.url}")
+        await bot.subscribe_webhook(url, secret=secret)
+        logging.info(f"Вебхук подписан: {url}")
+    except Exception:
+        logging.exception("Не удалось настроить подписку вебхука")
+
+
 async def main():
     start_http_server(int(os.getenv("METRICS_PORT", "9114")))
     asyncio.create_task(update_gauges())
-    await dp.start_polling(bot)
+
+    webhook_url = os.getenv("WEBHOOK_URL")
+    if webhook_url:
+        # вебхук-режим: MAX сам шлёт события на nginx -> наш aiohttp-сервер.
+        # Секрет проверяется библиотекой по заголовку X-Max-Bot-Api-Secret.
+        secret = os.getenv("WEBHOOK_SECRET")
+        asyncio.create_task(_ensure_webhook_subscription(webhook_url, secret))
+        await dp.handle_webhook(
+            bot,
+            host="0.0.0.0",
+            port=int(os.getenv("WEBHOOK_PORT", "8082")),
+            path=urlparse(webhook_url).path,
+            secret=secret,
+        )
+    else:
+        await dp.start_polling(bot)
 
 
 if __name__ == '__main__':

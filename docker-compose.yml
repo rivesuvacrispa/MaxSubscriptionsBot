@@ -20,6 +20,8 @@ services:
     ports:
       # Prometheus-метрики бота; наружу отдаёт nginx на :9114 (под nft mon-filter)
       - "127.0.0.1:9115:9114"
+      # вебхук MAX; снаружи терминирует nginx (admin.your-zloy.online/max-webhook/...)
+      - "127.0.0.1:8084:8082"
 
   admin:
     build:
