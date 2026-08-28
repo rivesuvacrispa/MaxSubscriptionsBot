@@ -237,6 +237,90 @@ async def save_user(chat_id: int, user_id: int, username: str | None, status: bo
     if status:
         await redis_client.sadd("users:verified", str(chat_id))
 
+    # обратный индекс для переноса записи при смене бота (см. adopt_user_by_user_id)
+    await redis_client.set(f"uid:{user_id}", str(chat_id))
+
+
+async def ensure_uid_index() -> None:
+    """Разовый бэкфилл обратного индекса uid:{user_id} -> chat_id.
+
+    Для новых записей индекс ведёт save_user; исторические записи досоздаёт
+    этот бэкфилл (флаг uid:backfilled). Идём по users:index от старых к новым:
+    при дублях user_id побеждает более свежая запись.
+    """
+    if await redis_client.get("uid:backfilled"):
+        return
+
+    start = 0
+    batch = 500
+    while True:
+        chat_ids = await redis_client.zrange("users:index", start, start + batch - 1)
+        if not chat_ids:
+            break
+
+        async with redis_client.pipeline() as pipe:
+            for chat_id in chat_ids:
+                await pipe.hget(f"user:{chat_id}", "user_id")
+            user_ids = await pipe.execute()
+
+        async with redis_client.pipeline() as pipe:
+            for chat_id, user_id in zip(chat_ids, user_ids):
+                if user_id:
+                    await pipe.set(f"uid:{user_id}", str(chat_id))
+            await pipe.execute()
+
+        start += batch
+
+    await redis_client.set("uid:backfilled", "1")
+
+
+async def adopt_user_by_user_id(user_id: int, new_chat_id: int) -> bool:
+    """Переносит запись пользователя на новый chat_id по совпадению user_id.
+
+    Диалоговые chat_id в MAX привязаны к паре «пользователь-бот»: при смене
+    бота у того же человека будет другой chat_id, а user_id глобальный.
+    Если новый chat_id боту ещё не известен, а по uid-индексу находится
+    старая запись — переносим её целиком (статус участия, дату, место
+    в индексе) на новый chat_id и удаляем старую. Возвращает True при переносе.
+    """
+    if await redis_client.exists(f"user:{new_chat_id}"):
+        return False
+
+    old_chat_id = await redis_client.get(f"uid:{user_id}")
+    if old_chat_id is None or int(old_chat_id) == new_chat_id:
+        return False
+
+    old = await redis_client.hgetall(f"user:{old_chat_id}")
+    if not old or int(old.get("user_id", 0)) != user_id:
+        return False
+
+    score = await redis_client.zscore("users:index", str(old_chat_id))
+    if score is None:
+        score = datetime.datetime.now(datetime.timezone.utc).timestamp()
+    status = bool(int(old.get("status", 0)))
+
+    async with redis_client.pipeline() as pipe:
+        await pipe.hset(
+            f"user:{new_chat_id}",
+            mapping={
+                "chat_id": new_chat_id,
+                "user_id": user_id,
+                "username": old.get("username", ""),
+                "date_updated": old.get("date_updated", ""),
+                "status": int(status),
+            },
+        )
+        await pipe.zadd("users:index", {str(new_chat_id): score})
+        if status:
+            await pipe.sadd("users:verified", str(new_chat_id))
+        await pipe.delete(f"user:{old_chat_id}")
+        await pipe.zrem("users:index", str(old_chat_id))
+        await pipe.srem("users:verified", str(old_chat_id))
+        await pipe.set(f"uid:{user_id}", str(new_chat_id))
+        await pipe.execute()
+
+    return True
+
 
 async def get_user(chat_id: int) -> dict | None:
     """Получить одного пользователя (формат как в get_users) или None."""

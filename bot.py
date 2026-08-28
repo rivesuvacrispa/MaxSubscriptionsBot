@@ -140,6 +140,13 @@ async def bot_started(event: BotStarted):
 
     username = " ".join(filter(None, [event.user.first_name, event.user.last_name]))
 
+    # при смене бота диалоговый chat_id другой — подхватываем старую запись
+    # пользователя (статус участия) по глобальному user_id
+    if await redis_storage.adopt_user_by_user_id(event.user.user_id, event.chat_id):
+        logging.info(
+            f"Запись пользователя {event.user.user_id} перенесена на chat_id {event.chat_id}"
+        )
+
     # повторный «Старт» не должен сбрасывать уже подтверждённое участие
     verified = await redis_storage.get_user_status(event.chat_id)
 
@@ -263,6 +270,9 @@ async def _ensure_webhook_subscription(url: str, secret: str | None) -> None:
 
 async def main():
     start_http_server(int(os.getenv("METRICS_PORT", "9114")))
+    # бэкфилл uid-индекса до приёма событий: adopt_user_by_user_id при смене
+    # бота должен видеть всех исторических пользователей
+    await redis_storage.ensure_uid_index()
     asyncio.create_task(update_gauges())
 
     webhook_url = os.getenv("WEBHOOK_URL")
