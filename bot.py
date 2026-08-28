@@ -38,10 +38,7 @@ check_semaphore = asyncio.Semaphore(int(os.getenv("MAX_CONCURRENT_CHECKS", "64")
 CHECK_COOLDOWN = int(os.getenv("CHECK_COOLDOWN", "2"))
 
 # условия розыгрыша и политика конфиденциальности — ссылка в конце приветствия
-TERMS_URL = os.getenv(
-    "TERMS_URL",
-    "https://telegra.ph/USLOVIYA-PROVEDENIYA-STIMULIRUYUSHCHEGO-MEROPRIYATIYA-ROZYGRYSH-3-SAMSUNG-GALAXY-S26-ULTRA-08-28",
-)
+TERMS_URL = os.getenv("TERMS_URL", "https://glas.su/s/HspKGs")
 
 # --- Prometheus-метрики (HTTP на METRICS_PORT внутри контейнера) ---
 EVENTS = Counter("bot_events_total", "Обработанные события бота", ["handler"])
