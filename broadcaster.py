@@ -29,7 +29,7 @@ STALE_SECONDS = 60.0
 # троттлинг отправки, сообщений в секунду
 RATE = float(os.getenv("BROADCAST_RATE", "20"))
 
-bot = rate_limit.throttle_bot(Bot(os.getenv("BOT_TOKEN")))
+bot = rate_limit.throttle_bot(Bot(os.getenv("BOT_TOKEN"), disable_link_preview=True))
 
 
 def is_terminal_error(e: MaxApiError) -> bool:

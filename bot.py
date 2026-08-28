@@ -16,7 +16,7 @@ import subscription_check
 
 logging.basicConfig(level=logging.INFO)
 
-bot = rate_limit.throttle_bot(Bot(os.getenv("BOT_TOKEN")))
+bot = rate_limit.throttle_bot(Bot(os.getenv("BOT_TOKEN"), disable_link_preview=True))
 # проверки подписки можно вести отдельным ботом (CHECK_BOT_TOKEN): старый бот
 # остаётся админом каналов и проверяет, даже когда диалоги ведёт новый.
 # Без CHECK_BOT_TOKEN проверяет основной бот. Лимитер MAX API общий на обоих.
