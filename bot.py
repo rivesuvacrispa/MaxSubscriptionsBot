@@ -17,6 +17,14 @@ import subscription_check
 logging.basicConfig(level=logging.INFO)
 
 bot = rate_limit.throttle_bot(Bot(os.getenv("BOT_TOKEN")))
+# проверки подписки можно вести отдельным ботом (CHECK_BOT_TOKEN): старый бот
+# остаётся админом каналов и проверяет, даже когда диалоги ведёт новый.
+# Без CHECK_BOT_TOKEN проверяет основной бот. Лимитер MAX API общий на обоих.
+check_bot = (
+    rate_limit.throttle_bot(Bot(os.getenv("CHECK_BOT_TOKEN")))
+    if os.getenv("CHECK_BOT_TOKEN")
+    else bot
+)
 # use_create_task=True: события обрабатываются параллельно; дефолтный
 # последовательный режим давал ~6 нажатий/с — очередь встаёт при наплыве
 dp = Dispatcher(use_create_task=True)
@@ -80,7 +88,7 @@ _UNAVAILABLE = subscription_check.UNAVAILABLE
 
 async def _get_member_with_retry(channel_id, user_id):
     return await subscription_check.get_member_with_retry(
-        bot, channel_id, user_id,
+        check_bot, channel_id, user_id,
         on_transient_error=API_TRANSIENT_ERRORS.inc,
     )
 

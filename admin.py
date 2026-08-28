@@ -169,7 +169,10 @@ _recheck_task: asyncio.Task | None = None
 def _get_recheck_bot() -> Bot:
     global _recheck_bot
     if _recheck_bot is None:
-        _recheck_bot = rate_limit.throttle_bot(Bot(os.getenv("BOT_TOKEN")))
+        # перепроверка ходит тем же ботом, что и проверки в боте:
+        # CHECK_BOT_TOKEN (старый бот-админ каналов), иначе основной
+        token = os.getenv("CHECK_BOT_TOKEN") or os.getenv("BOT_TOKEN")
+        _recheck_bot = rate_limit.throttle_bot(Bot(token))
     return _recheck_bot
 
 
