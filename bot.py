@@ -37,6 +37,12 @@ check_semaphore = asyncio.Semaphore(int(os.getenv("MAX_CONCURRENT_CHECKS", "64")
 # TTL молча игнорируются — защита от спама кнопкой и лишних вызовов MAX API
 CHECK_COOLDOWN = int(os.getenv("CHECK_COOLDOWN", "2"))
 
+# условия розыгрыша и политика конфиденциальности — ссылка в конце приветствия
+TERMS_URL = os.getenv(
+    "TERMS_URL",
+    "https://telegra.ph/USLOVIYA-PROVEDENIYA-STIMULIRUYUSHCHEGO-MEROPRIYATIYA-ROZYGRYSH-3-SAMSUNG-GALAXY-S26-ULTRA-08-28",
+)
+
 # --- Prometheus-метрики (HTTP на METRICS_PORT внутри контейнера) ---
 EVENTS = Counter("bot_events_total", "Обработанные события бота", ["handler"])
 DURATION = Histogram(
@@ -116,6 +122,10 @@ async def _build_checklist_message(verified: bool, chat_id: int) -> str:
         message = message.replace("{count}", str(participants))
     else:
         message += f"\n\nУже участвуют: {participants}"
+
+    message += (
+        f"""\n\n<a href="{TERMS_URL}">Условия розыгрыша и политика конфиденциальности</a>"""
+    )
 
     return message
 
