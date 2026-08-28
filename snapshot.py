@@ -133,9 +133,10 @@ async def snapshot_users(conn: asyncpg.Connection) -> int:
 
 async def snapshot_meta(conn: asyncpg.Connection) -> None:
     chats = await redis_storage.get_all_chats()
+    start_variants = await redis_storage.get_start_messages()
     messages = {
-        "welcome": await redis_storage.get_welcome_message(),
-        "start": await redis_storage.get_start_message(),
+        "start": start_variants[0],
+        "start_variants": start_variants,
         "success": await redis_storage.get_success_message(),
         "fail": await redis_storage.get_fail_message(),
     }

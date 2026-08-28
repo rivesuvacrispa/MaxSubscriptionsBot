@@ -456,8 +456,7 @@ async def index(
     _: Annotated[str, Depends(basic_auth)],
 ):
     messages = {
-        "welcome": await redis_storage.get_welcome_message(),
-        "start": await redis_storage.get_start_message(),
+        "start_variants": await redis_storage.get_start_messages(),
         "success": await redis_storage.get_success_message(),
         "fail": await redis_storage.get_fail_message(),
     }
@@ -477,9 +476,16 @@ async def update_bot_messages(
     messages: dict = Body(...),
     _: Annotated[str, Depends(basic_auth)] = None,
 ):
+    start_variants = messages["start_variants"]
+    if not isinstance(start_variants, list) or not all(
+        isinstance(m, str) for m in start_variants
+    ):
+        raise HTTPException(status_code=422, detail="start_variants должен быть списком строк")
+    if not any(m.strip() for m in start_variants):
+        raise HTTPException(status_code=422, detail="нужен хотя бы один непустой вариант приветствия")
+
     await asyncio.gather(
-        redis_storage.set_welcome_message(messages["welcome"]),
-        redis_storage.set_start_message(messages["start"]),
+        redis_storage.set_start_messages(start_variants),
         redis_storage.set_success_message(messages["success"]),
         redis_storage.set_fail_message(messages["fail"]),
     )

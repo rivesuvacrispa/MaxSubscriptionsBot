@@ -434,22 +434,40 @@ async def delete_user(chat_id: int) -> None:
         await pipe.execute()
 
 
-async def set_welcome_message(message: str) -> None:
-    await redis_client.set("message:welcome", message)
+DEFAULT_START_MESSAGE = "Для участия в розыгрыше вы должны подписаться на следующие каналы:"
 
 
-async def get_welcome_message() -> str:
-    message = await redis_client.get("message:welcome")
-    return message or "Привет! Отправь мне /start"
+async def set_start_messages(messages: list[str]) -> None:
+    """Сохраняет варианты приветствия на bot_started (количество не ограничено)."""
+    messages = [m for m in (m.strip() for m in messages) if m]
+    await redis_client.set("message:start:variants", json.dumps(messages))
+    # обратная совместимость: одиночный ключ хранит первый вариант
+    if messages:
+        await redis_client.set("message:start", messages[0])
 
 
-async def set_start_message(message: str) -> None:
-    await redis_client.set("message:start", message)
+async def get_start_messages() -> list[str]:
+    """Все варианты приветствия на bot_started; фоллбэк — старый одиночный ключ."""
+    data = await redis_client.get("message:start:variants")
+    if data:
+        variants = json.loads(data)
+        if variants:
+            return variants
+
+    single = await redis_client.get("message:start")
+    return [single or DEFAULT_START_MESSAGE]
 
 
-async def get_start_message() -> str:
-    message = await redis_client.get("message:start")
-    return message or "Для участия в розыгрыше вы должны подписаться на следующие каналы:"
+async def get_start_message_for(chat_id: int) -> str:
+    """Вариант приветствия (bot_started) для конкретного пользователя.
+
+    Выбор детерминирован по chat_id: между пользователями варианты
+    распределяются случайно, но один и тот же человек всегда видит один
+    текст — иначе перерисовка сообщения при снятии кнопки («Я подписался»
+    у подтверждённого) подменяла бы ему текст на другой вариант.
+    """
+    variants = await get_start_messages()
+    return variants[chat_id % len(variants)]
 
 
 async def set_success_message(message: str) -> None:

@@ -85,13 +85,13 @@ async def _get_member_with_retry(channel_id, user_id):
     )
 
 
-async def _build_checklist_message(verified: bool) -> str:
+async def _build_checklist_message(verified: bool, chat_id: int) -> str:
     """Стартовое сообщение со списком каналов.
 
     Для подтверждённого участника каналы помечаются ✅ и подсказка про кнопку
     заменяется на подтверждение участия — кнопка ему больше не нужна.
     """
-    message = await redis_storage.get_start_message()
+    message = await redis_storage.get_start_message_for(chat_id)
     channels = await redis_storage.get_channel_checklist()
 
     mark = "✅" if verified else "❌"
@@ -121,7 +121,7 @@ async def _hide_check_button(callback: MessageCallback):
     if original is None:
         return
     try:
-        text = await _build_checklist_message(verified=True)
+        text = await _build_checklist_message(verified=True, chat_id=callback.chat.chat_id)
         await bot.edit_message(
             message_id=original.body.mid,
             text=text,
@@ -157,7 +157,7 @@ async def bot_started(event: BotStarted):
         status=verified
     )
 
-    message = await _build_checklist_message(verified=verified)
+    message = await _build_checklist_message(verified=verified, chat_id=event.chat_id)
 
     attachments = None
     if not verified:

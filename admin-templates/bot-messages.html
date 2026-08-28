@@ -12,34 +12,27 @@
 <form id="messages-form">
 
     <div class="message-field">
-        <label for="welcome-message">
-            Приветственное сообщение
+        <label>
+            Приветственные сообщения (при запуске бота)
         </label>
 
-        <textarea
-            id="welcome-message"
-            name="welcome"
-            rows="4"
-        >{{ messages.welcome }}</textarea>
-
-        <div class="message-hint">
-            Отправляется пользователю при приветствии.
+        <div id="start-variants">
+            {% for variant in messages.start_variants %}
+            <div class="start-variant">
+                <textarea
+                    class="start-variant-text"
+                    rows="6"
+                >{{ variant }}</textarea>
+                <button type="button" class="delete-button remove-variant">Удалить вариант</button>
+            </div>
+            {% endfor %}
         </div>
-    </div>
 
-
-    <div class="message-field">
-        <label for="start-message">
-            Сообщение при /start
-        </label>
-
-        <textarea
-            id="start-message"
-            name="start"
-            rows="6"
-        >{{ messages.start }}</textarea>
+        <button type="button" id="add-variant">+ Добавить вариант</button>
 
         <div class="message-hint">
+            Каждому пользователю показывается один из вариантов — выбор случайный,
+            но закреплён за пользователем (при повторном запуске он видит тот же текст).
             Плейсхолдер {count} заменяется на число участников розыгрыша.
             Если плейсхолдера нет — строка «Уже участвуют: N» добавляется в конец автоматически.
         </div>
@@ -83,7 +76,58 @@
 </form>
 
 
+<style>
+    .start-variant {
+        margin-bottom: 12px;
+    }
+
+    .start-variant .remove-variant {
+        margin-top: 4px;
+    }
+
+    #add-variant {
+        margin-bottom: 8px;
+    }
+</style>
+
+
 <script>
+    const variantsContainer = document.getElementById("start-variants");
+
+    function addVariant(text) {
+        const wrapper = document.createElement("div");
+        wrapper.className = "start-variant";
+
+        const textarea = document.createElement("textarea");
+        textarea.className = "start-variant-text";
+        textarea.rows = 6;
+        textarea.value = text || "";
+
+        const removeButton = document.createElement("button");
+        removeButton.type = "button";
+        removeButton.className = "delete-button remove-variant";
+        removeButton.textContent = "Удалить вариант";
+
+        wrapper.appendChild(textarea);
+        wrapper.appendChild(removeButton);
+        variantsContainer.appendChild(wrapper);
+    }
+
+    document
+        .getElementById("add-variant")
+        .addEventListener("click", () => addVariant(""));
+
+    variantsContainer.addEventListener("click", (event) => {
+        if (!event.target.classList.contains("remove-variant")) {
+            return;
+        }
+        if (variantsContainer.querySelectorAll(".start-variant").length <= 1) {
+            alert("Нужен хотя бы один вариант приветствия");
+            return;
+        }
+        event.target.closest(".start-variant").remove();
+    });
+
     document
         .getElementById("messages-form")
         .addEventListener("submit", async function (event) {
@@ -91,9 +135,18 @@
 
             const status = document.getElementById("status");
 
+            const startVariants = Array
+                .from(document.querySelectorAll(".start-variant-text"))
+                .map((textarea) => textarea.value)
+                .filter((text) => text.trim() !== "");
+
+            if (startVariants.length === 0) {
+                status.textContent = "Нужен хотя бы один непустой вариант приветствия";
+                return;
+            }
+
             const messages = {
-                welcome: document.getElementById("welcome-message").value,
-                start: document.getElementById("start-message").value,
+                start_variants: startVariants,
                 success: document.getElementById("success-message").value,
                 fail: document.getElementById("fail-message").value,
             };
