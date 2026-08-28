@@ -457,7 +457,7 @@ async def index(
 ):
     messages = {
         "start_variants": await redis_storage.get_start_messages(),
-        "success": await redis_storage.get_success_message(),
+        "success_variants": await redis_storage.get_success_messages(),
         "fail": await redis_storage.get_fail_message(),
     }
 
@@ -476,17 +476,22 @@ async def update_bot_messages(
     messages: dict = Body(...),
     _: Annotated[str, Depends(basic_auth)] = None,
 ):
-    start_variants = messages["start_variants"]
-    if not isinstance(start_variants, list) or not all(
-        isinstance(m, str) for m in start_variants
-    ):
-        raise HTTPException(status_code=422, detail="start_variants должен быть списком строк")
-    if not any(m.strip() for m in start_variants):
-        raise HTTPException(status_code=422, detail="нужен хотя бы один непустой вариант приветствия")
+    def validated_variants(field: str) -> list[str]:
+        variants = messages[field]
+        if not isinstance(variants, list) or not all(
+            isinstance(m, str) for m in variants
+        ):
+            raise HTTPException(status_code=422, detail=f"{field} должен быть списком строк")
+        if not any(m.strip() for m in variants):
+            raise HTTPException(status_code=422, detail=f"нужен хотя бы один непустой вариант ({field})")
+        return variants
+
+    start_variants = validated_variants("start_variants")
+    success_variants = validated_variants("success_variants")
 
     await asyncio.gather(
         redis_storage.set_start_messages(start_variants),
-        redis_storage.set_success_message(messages["success"]),
+        redis_storage.set_success_messages(success_variants),
         redis_storage.set_fail_message(messages["fail"]),
     )
 

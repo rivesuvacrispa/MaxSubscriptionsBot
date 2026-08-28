@@ -134,10 +134,12 @@ async def snapshot_users(conn: asyncpg.Connection) -> int:
 async def snapshot_meta(conn: asyncpg.Connection) -> None:
     chats = await redis_storage.get_all_chats()
     start_variants = await redis_storage.get_start_messages()
+    success_variants = await redis_storage.get_success_messages()
     messages = {
         "start": start_variants[0],
         "start_variants": start_variants,
-        "success": await redis_storage.get_success_message(),
+        "success": success_variants[0],
+        "success_variants": success_variants,
         "fail": await redis_storage.get_fail_message(),
     }
     await conn.execute(UPSERT_KV, "chats", json.dumps(chats, ensure_ascii=False))

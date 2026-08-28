@@ -198,7 +198,7 @@ async def check_user(callback: MessageCallback):
     if user_status:
         CHECK_RESULTS.labels("already_verified").inc()
         await _hide_check_button(callback)
-        message = await redis_storage.get_success_message()
+        message = await redis_storage.get_success_message_for(chat_id)
         await callback.chat.send(message, parse_mode=ParseMode.HTML)
         return
 
@@ -245,7 +245,7 @@ async def check_user(callback: MessageCallback):
     )
     CHECK_RESULTS.labels("success").inc()
     await _hide_check_button(callback)
-    message = await redis_storage.get_success_message()
+    message = await redis_storage.get_success_message_for(chat_id)
     await callback.chat.send(message, parse_mode=ParseMode.HTML)
 
 

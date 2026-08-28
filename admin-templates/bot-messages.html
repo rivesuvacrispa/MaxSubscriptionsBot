@@ -1,5 +1,33 @@
 {% extends "_base.html" %}
 
+{% macro variant_group(group, label, variants, hint) %}
+<div class="message-field variant-group" data-group="{{ group }}">
+    <label>
+        {{ label }}
+    </label>
+
+    <div class="variants">
+        {% for variant in variants %}
+        <div class="variant">
+            <textarea
+                class="variant-text"
+                rows="6"
+            >{{ variant }}</textarea>
+            <button type="button" class="delete-button remove-variant">Удалить вариант</button>
+        </div>
+        {% endfor %}
+    </div>
+
+    <button type="button" class="add-variant">+ Добавить вариант</button>
+
+    <div class="message-hint">
+        Каждому пользователю показывается один из вариантов — выбор случайный,
+        но закреплён за пользователем (при повторе он видит тот же текст).
+        {{ hint }}
+    </div>
+</div>
+{% endmacro %}
+
 {% block content %}
 
 <div class="message-hint">
@@ -11,46 +39,20 @@
 <br>
 <form id="messages-form">
 
-    <div class="message-field">
-        <label>
-            Приветственные сообщения (при запуске бота)
-        </label>
+    {{ variant_group(
+        "start",
+        "Приветственные сообщения (при запуске бота)",
+        messages.start_variants,
+        "Плейсхолдер {count} заменяется на число участников розыгрыша.
+         Если плейсхолдера нет — строка «Уже участвуют: N» добавляется в конец автоматически."
+    ) }}
 
-        <div id="start-variants">
-            {% for variant in messages.start_variants %}
-            <div class="start-variant">
-                <textarea
-                    class="start-variant-text"
-                    rows="6"
-                >{{ variant }}</textarea>
-                <button type="button" class="delete-button remove-variant">Удалить вариант</button>
-            </div>
-            {% endfor %}
-        </div>
-
-        <button type="button" id="add-variant">+ Добавить вариант</button>
-
-        <div class="message-hint">
-            Каждому пользователю показывается один из вариантов — выбор случайный,
-            но закреплён за пользователем (при повторном запуске он видит тот же текст).
-            Плейсхолдер {count} заменяется на число участников розыгрыша.
-            Если плейсхолдера нет — строка «Уже участвуют: N» добавляется в конец автоматически.
-        </div>
-    </div>
-
-
-    <div class="message-field">
-        <label for="success-message">
-            Сообщение при успешной подписке
-        </label>
-
-        <textarea
-            id="success-message"
-            name="success"
-            rows="4"
-        >{{ messages.success }}</textarea>
-    </div>
-
+    {{ variant_group(
+        "success",
+        "Сообщения при успешной подписке",
+        messages.success_variants,
+        ""
+    ) }}
 
     <div class="message-field">
         <label for="fail-message">
@@ -77,29 +79,27 @@
 
 
 <style>
-    .start-variant {
+    .variant {
         margin-bottom: 12px;
     }
 
-    .start-variant .remove-variant {
+    .variant .remove-variant {
         margin-top: 4px;
     }
 
-    #add-variant {
+    .add-variant {
         margin-bottom: 8px;
     }
 </style>
 
 
 <script>
-    const variantsContainer = document.getElementById("start-variants");
-
-    function addVariant(text) {
+    function addVariant(container, text) {
         const wrapper = document.createElement("div");
-        wrapper.className = "start-variant";
+        wrapper.className = "variant";
 
         const textarea = document.createElement("textarea");
-        textarea.className = "start-variant-text";
+        textarea.className = "variant-text";
         textarea.rows = 6;
         textarea.value = text || "";
 
@@ -110,23 +110,36 @@
 
         wrapper.appendChild(textarea);
         wrapper.appendChild(removeButton);
-        variantsContainer.appendChild(wrapper);
+        container.appendChild(wrapper);
     }
 
-    document
-        .getElementById("add-variant")
-        .addEventListener("click", () => addVariant(""));
+    document.addEventListener("click", (event) => {
+        if (event.target.classList.contains("add-variant")) {
+            const container = event.target
+                .closest(".variant-group")
+                .querySelector(".variants");
+            addVariant(container, "");
+            return;
+        }
 
-    variantsContainer.addEventListener("click", (event) => {
-        if (!event.target.classList.contains("remove-variant")) {
-            return;
+        if (event.target.classList.contains("remove-variant")) {
+            const container = event.target.closest(".variants");
+            if (container.querySelectorAll(".variant").length <= 1) {
+                alert("Нужен хотя бы один вариант");
+                return;
+            }
+            event.target.closest(".variant").remove();
         }
-        if (variantsContainer.querySelectorAll(".start-variant").length <= 1) {
-            alert("Нужен хотя бы один вариант приветствия");
-            return;
-        }
-        event.target.closest(".start-variant").remove();
     });
+
+    function collectVariants(group) {
+        return Array
+            .from(document.querySelectorAll(
+                `.variant-group[data-group="${group}"] .variant-text`
+            ))
+            .map((textarea) => textarea.value)
+            .filter((text) => text.trim() !== "");
+    }
 
     document
         .getElementById("messages-form")
@@ -135,19 +148,17 @@
 
             const status = document.getElementById("status");
 
-            const startVariants = Array
-                .from(document.querySelectorAll(".start-variant-text"))
-                .map((textarea) => textarea.value)
-                .filter((text) => text.trim() !== "");
+            const startVariants = collectVariants("start");
+            const successVariants = collectVariants("success");
 
-            if (startVariants.length === 0) {
-                status.textContent = "Нужен хотя бы один непустой вариант приветствия";
+            if (startVariants.length === 0 || successVariants.length === 0) {
+                status.textContent = "В каждой группе нужен хотя бы один непустой вариант";
                 return;
             }
 
             const messages = {
                 start_variants: startVariants,
-                success: document.getElementById("success-message").value,
+                success_variants: successVariants,
                 fail: document.getElementById("fail-message").value,
             };
 

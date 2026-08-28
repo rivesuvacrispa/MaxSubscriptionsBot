@@ -435,27 +435,36 @@ async def delete_user(chat_id: int) -> None:
 
 
 DEFAULT_START_MESSAGE = "Для участия в розыгрыше вы должны подписаться на следующие каналы:"
+DEFAULT_SUCCESS_MESSAGE = "Вы успешно участвуете в розыгрыше!"
 
 
-async def set_start_messages(messages: list[str]) -> None:
-    """Сохраняет варианты приветствия на bot_started (количество не ограничено)."""
+async def _set_message_variants(key: str, messages: list[str]) -> None:
     messages = [m for m in (m.strip() for m in messages) if m]
-    await redis_client.set("message:start:variants", json.dumps(messages))
+    await redis_client.set(f"{key}:variants", json.dumps(messages))
     # обратная совместимость: одиночный ключ хранит первый вариант
     if messages:
-        await redis_client.set("message:start", messages[0])
+        await redis_client.set(key, messages[0])
 
 
-async def get_start_messages() -> list[str]:
-    """Все варианты приветствия на bot_started; фоллбэк — старый одиночный ключ."""
-    data = await redis_client.get("message:start:variants")
+async def _get_message_variants(key: str, default: str) -> list[str]:
+    data = await redis_client.get(f"{key}:variants")
     if data:
         variants = json.loads(data)
         if variants:
             return variants
 
-    single = await redis_client.get("message:start")
-    return [single or DEFAULT_START_MESSAGE]
+    single = await redis_client.get(key)
+    return [single or default]
+
+
+async def set_start_messages(messages: list[str]) -> None:
+    """Сохраняет варианты приветствия на bot_started (количество не ограничено)."""
+    await _set_message_variants("message:start", messages)
+
+
+async def get_start_messages() -> list[str]:
+    """Все варианты приветствия на bot_started; фоллбэк — старый одиночный ключ."""
+    return await _get_message_variants("message:start", DEFAULT_START_MESSAGE)
 
 
 async def get_start_message_for(chat_id: int) -> str:
@@ -470,13 +479,24 @@ async def get_start_message_for(chat_id: int) -> str:
     return variants[chat_id % len(variants)]
 
 
-async def set_success_message(message: str) -> None:
-    await redis_client.set("message:success", message)
+async def set_success_messages(messages: list[str]) -> None:
+    """Сохраняет варианты сообщения об успешном участии."""
+    await _set_message_variants("message:success", messages)
 
 
-async def get_success_message() -> str:
-    message = await redis_client.get("message:success")
-    return message or "Вы успешно участвуете в розыгрыше!"
+async def get_success_messages() -> list[str]:
+    """Все варианты сообщения об успехе; фоллбэк — старый одиночный ключ."""
+    return await _get_message_variants("message:success", DEFAULT_SUCCESS_MESSAGE)
+
+
+async def get_success_message_for(chat_id: int) -> str:
+    """Вариант сообщения об успехе для конкретного пользователя.
+
+    Детерминирован по chat_id, как и приветствие: повторное нажатие
+    «Я подписался» подтверждённым шлёт тот же текст, а не новый вариант.
+    """
+    variants = await get_success_messages()
+    return variants[chat_id % len(variants)]
 
 
 async def set_fail_message(message: str) -> None:
