@@ -67,6 +67,25 @@
     </div>
 
 
+    <div class="message-field">
+        <label for="results-message">
+            Итоги розыгрыша
+        </label>
+
+        <textarea
+            id="results-message"
+            name="results"
+            rows="6"
+        >{{ messages.results }}</textarea>
+
+        <div class="message-hint">
+            Показывается вместо приветствия тем, кто открыл бота по ссылке с
+            параметром <code>start=results</code>. Пустое поле — по такой ссылке
+            идёт обычное приветствие.
+        </div>
+    </div>
+
+
     <div class="actions">
         <button type="submit">
             Сохранить
@@ -160,6 +179,7 @@
                 start_variants: startVariants,
                 success_variants: successVariants,
                 fail: document.getElementById("fail-message").value,
+                results: document.getElementById("results-message").value,
             };
 
             status.textContent = "Сохранение...";

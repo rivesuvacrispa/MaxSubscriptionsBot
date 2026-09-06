@@ -476,6 +476,7 @@ async def index(
         "start_variants": await redis_storage.get_start_messages(),
         "success_variants": await redis_storage.get_success_messages(),
         "fail": await redis_storage.get_fail_message(),
+        "results": await redis_storage.get_results_message() or "",
     }
 
     return templates.TemplateResponse(
@@ -506,10 +507,15 @@ async def update_bot_messages(
     start_variants = validated_variants("start_variants")
     success_variants = validated_variants("success_variants")
 
+    results = messages.get("results", "")
+    if not isinstance(results, str):
+        raise HTTPException(status_code=422, detail="results должен быть строкой")
+
     await asyncio.gather(
         redis_storage.set_start_messages(start_variants),
         redis_storage.set_success_messages(success_variants),
         redis_storage.set_fail_message(messages["fail"]),
+        redis_storage.set_results_message(results),
     )
 
     return {"status": "ok"}

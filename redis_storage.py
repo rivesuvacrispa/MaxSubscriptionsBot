@@ -527,6 +527,22 @@ async def get_success_message_for(chat_id: int) -> str:
     return variants[chat_id % len(variants)]
 
 
+async def set_results_message(message: str) -> None:
+    """Текст итогов розыгрыша (показывается по deep-link ?start=results).
+
+    Пустой текст выключает фичу: по такой ссылке пойдёт обычное приветствие.
+    """
+    message = message.strip()
+    if message:
+        await redis_client.set("message:results", message)
+    else:
+        await redis_client.delete("message:results")
+
+
+async def get_results_message() -> str | None:
+    return await redis_client.get("message:results")
+
+
 async def set_fail_message(message: str) -> None:
     await redis_client.set("message:fail", message)
 

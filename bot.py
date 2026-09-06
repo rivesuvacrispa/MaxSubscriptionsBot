@@ -172,6 +172,18 @@ async def bot_started(event: BotStarted):
         status=verified
     )
 
+    # deep-link на итоги розыгрыша (?start=results): вместо приветствия шлём
+    # текст итогов из админки; если текст не задан — обычный сценарий
+    if (event.payload or "").strip().lower() == "results":
+        results = await redis_storage.get_results_message()
+        if results:
+            await event.bot.send_message(
+                chat_id=event.chat_id,
+                text=results,
+                parse_mode=ParseMode.HTML,
+            )
+            return
+
     message = await _build_checklist_message(verified=verified, chat_id=event.chat_id)
 
     attachments = None
