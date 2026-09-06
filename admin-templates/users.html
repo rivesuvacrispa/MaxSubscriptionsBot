@@ -8,6 +8,9 @@
     <button type="button" id="recheck-button" class="export-button" onclick="startRecheck()">
         🔄 Проверить подписки у всех
     </button>
+    <button type="button" id="reset-button" class="delete-button" onclick="resetStatuses()">
+        ♻️ Сбросить проверку у всех
+    </button>
     <span id="recheck-status"></span>
 </div>
 
@@ -241,6 +244,46 @@
             console.error(error);
         }
     })();
+
+    async function resetStatuses() {
+        const confirmation = prompt(
+            "Сбросить статус проверки у ВСЕХ участников?\n" +
+            "Счётчик участников обнулится, всем придётся проходить проверку заново.\n\n" +
+            "Для подтверждения введите: СБРОС"
+        );
+        if (confirmation === null) {
+            return;
+        }
+        if (confirmation.trim().toUpperCase() !== "СБРОС") {
+            alert("Сброс отменён: подтверждение не совпало.");
+            return;
+        }
+
+        const resetButton = document.getElementById("reset-button");
+        resetButton.disabled = true;
+
+        try {
+            const response = await fetch("/admin/users/reset-status", { method: "POST" });
+
+            if (response.status === 409) {
+                alert("Идёт другая массовая операция (перепроверка?). Дождитесь её завершения.");
+                return;
+            }
+
+            if (!response.ok) {
+                throw new Error("Ошибка сброса");
+            }
+
+            const result = await response.json();
+            alert("Статус сброшен у " + result.reset + " пользователей.");
+            location.reload();
+        } catch (error) {
+            console.error(error);
+            alert("Не удалось сбросить статусы");
+        } finally {
+            resetButton.disabled = false;
+        }
+    }
 
     async function deleteUser(chatId) {
         if (!confirm("Удалить пользователя " + chatId + "? Он пропадёт из базы и счётчика участников.")) {

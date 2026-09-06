@@ -372,6 +372,34 @@ async def set_user_status(chat_id: int, status: bool) -> None:
         await pipe.execute()
 
 
+async def reset_all_statuses() -> int:
+    """Сбрасывает статус участия всем пользователям (новый раунд розыгрыша).
+
+    users:verified бэкапится в датированный ключ (восстановление руками при
+    необходимости). Дата и score в users:index обновляются как в
+    set_user_status — иначе инкрементальный снепшот в PG (watermark по score)
+    не увидит смену статуса. Возвращает число затронутых пользователей.
+    """
+    now = datetime.datetime.now(datetime.timezone.utc)
+    backup_key = f"users:verified:bak:{now.strftime('%Y%m%d-%H%M%S')}"
+    if await redis_client.exists("users:verified"):
+        await redis_client.copy("users:verified", backup_key)
+
+    chat_ids = await redis_client.zrange("users:index", 0, -1)
+    for i in range(0, len(chat_ids), 500):
+        async with redis_client.pipeline() as pipe:
+            for chat_id in chat_ids[i:i + 500]:
+                await pipe.hset(
+                    f"user:{chat_id}",
+                    mapping={"date_updated": now.isoformat(), "status": 0},
+                )
+                await pipe.zadd("users:index", {str(chat_id): now.timestamp()})
+            await pipe.execute()
+
+    await redis_client.delete("users:verified")
+    return len(chat_ids)
+
+
 async def is_bot_stopped() -> bool:
     """Глобальный рубильник из админки: бот молчит, рассылки стоят."""
     return bool(await redis_client.exists("bot:stopped"))

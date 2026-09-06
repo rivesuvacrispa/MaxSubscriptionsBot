@@ -303,6 +303,20 @@ async def start_recheck(_: Annotated[str, Depends(basic_auth)] = None):
     return {"status": "ok"}
 
 
+@app.post("/admin/users/reset-status")
+async def reset_statuses(_: Annotated[str, Depends(basic_auth)] = None):
+    # тот же лок, что у перепроверки: одновременные массовые операции над
+    # статусами затирали бы результаты друг друга
+    if not await redis_storage.try_acquire_recheck_lock():
+        raise HTTPException(status_code=409, detail="Идёт другая массовая операция")
+    try:
+        count = await redis_storage.reset_all_statuses()
+    finally:
+        await redis_storage.release_recheck_lock()
+    logging.warning("Сброшен статус проверки у всех пользователей (%s)", count)
+    return {"status": "ok", "reset": count}
+
+
 @app.get("/admin/users/recheck/status")
 async def recheck_status(_: Annotated[str, Depends(basic_auth)] = None):
     progress = await redis_storage.get_recheck_progress()
