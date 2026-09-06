@@ -7,8 +7,8 @@ from urllib.parse import urlparse
 
 from maxapi import Bot, Dispatcher, F
 from prometheus_client import Counter, Gauge, Histogram, start_http_server
-from maxapi.enums import ParseMode
-from maxapi.types import BotStarted, CallbackButton, MessageCallback
+from maxapi.enums import ChatType, ParseMode
+from maxapi.types import BotStarted, CallbackButton, MessageCallback, MessageCreated
 from maxapi.utils.inline_keyboard import InlineKeyboardBuilder
 import rate_limit
 import redis_storage
@@ -146,45 +146,43 @@ async def _hide_check_button(callback: MessageCallback):
         logging.warning(f"Не удалось убрать кнопку проверки: {e!r}")
 
 
-# Ответ бота при нажатии на кнопку "Начать": сразу список каналов и кнопка проверки
-@dp.bot_started()
-@instrumented("bot_started")
-async def bot_started(event: BotStarted):
+async def _start_flow(bot, chat_id: int, user, payload: str | None):
+    """Сценарий старта: общий для кнопки «Начать» и текстовой команды /start."""
     if await redis_storage.is_bot_stopped():
         return
 
-    username = " ".join(filter(None, [event.user.first_name, event.user.last_name]))
+    username = " ".join(filter(None, [user.first_name, user.last_name]))
 
     # при смене бота диалоговый chat_id другой — подхватываем старую запись
     # пользователя (статус участия) по глобальному user_id
-    if await redis_storage.adopt_user_by_user_id(event.user.user_id, event.chat_id):
+    if await redis_storage.adopt_user_by_user_id(user.user_id, chat_id):
         logging.info(
-            f"Запись пользователя {event.user.user_id} перенесена на chat_id {event.chat_id}"
+            f"Запись пользователя {user.user_id} перенесена на chat_id {chat_id}"
         )
 
     # повторный «Старт» не должен сбрасывать уже подтверждённое участие
-    verified = await redis_storage.get_user_status(event.chat_id)
+    verified = await redis_storage.get_user_status(chat_id)
 
     await redis_storage.save_user(
-        chat_id=event.chat_id,
-        user_id=event.user.user_id,
+        chat_id=chat_id,
+        user_id=user.user_id,
         username=username,
         status=verified
     )
 
     # deep-link на итоги розыгрыша (?start=results): вместо приветствия шлём
     # текст итогов из админки; если текст не задан — обычный сценарий
-    if (event.payload or "").strip().lower() == "results":
+    if (payload or "").strip().lower() == "results":
         results = await redis_storage.get_results_message()
         if results:
-            await event.bot.send_message(
-                chat_id=event.chat_id,
+            await bot.send_message(
+                chat_id=chat_id,
                 text=results,
                 parse_mode=ParseMode.HTML,
             )
             return
 
-    message = await _build_checklist_message(verified=verified, chat_id=event.chat_id)
+    message = await _build_checklist_message(verified=verified, chat_id=chat_id)
 
     attachments = None
     if not verified:
@@ -194,12 +192,47 @@ async def bot_started(event: BotStarted):
         )
         attachments = [builder.as_markup()]
 
-    await event.bot.send_message(
-        chat_id=event.chat_id,
+    await bot.send_message(
+        chat_id=chat_id,
         text=message,
         attachments=attachments,
         parse_mode=ParseMode.HTML
     )
+
+
+# Ответ бота при нажатии на кнопку "Начать": сразу список каналов и кнопка проверки
+@dp.bot_started()
+@instrumented("bot_started")
+async def bot_started(event: BotStarted):
+    await _start_flow(event.bot, event.chat_id, event.user, event.payload)
+
+
+@instrumented("start_command")
+async def _handle_start_command(event: MessageCreated):
+    text = (event.message.body.text or "").strip()
+    # «/start results» работает как deep-link с payload=results
+    parts = text.split(maxsplit=1)
+    payload = parts[1] if len(parts) > 1 else None
+    await _start_flow(
+        event.bot,
+        event.message.recipient.chat_id,
+        event.message.sender,
+        payload,
+    )
+
+
+# Текстовая команда /start — то же, что кнопка «Начать». Только личные диалоги:
+# бот-админ каналов получает message_created и из них, туда отвечать нельзя
+@dp.message_created()
+async def message_created(event: MessageCreated):
+    if event.message.recipient.chat_type != ChatType.DIALOG:
+        return
+    if event.message.sender is None or event.message.body is None:
+        return
+    parts = (event.message.body.text or "").strip().split(maxsplit=1)
+    if not parts or parts[0].lower() != "/start":
+        return
+    await _handle_start_command(event)
 
 
 # Обработчик нажатия на кнопку "Я подписался"
