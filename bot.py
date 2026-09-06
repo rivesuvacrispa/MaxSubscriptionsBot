@@ -208,6 +208,14 @@ async def check_user(callback: MessageCallback):
         CHECK_RESULTS.labels("cooldown").inc()
         return
 
+    # при двух живых ботах кнопку могут нажать в диалоге, куда запись юзера
+    # ещё не переехала (например, старая кнопка у старого бота) — без переноса
+    # save_user создал бы вторую запись и задвоил счётчик участников
+    if await redis_storage.adopt_user_by_user_id(user_id, chat_id):
+        logging.info(
+            f"Запись пользователя {user_id} перенесена на chat_id {chat_id} (check_user)"
+        )
+
     user_status = await redis_storage.get_user_status(chat_id)
 
     if user_status:
