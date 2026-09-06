@@ -23,6 +23,29 @@ services:
       # вебхук MAX; снаружи терминирует nginx (admin.your-zloy.online/max-webhook/...)
       - "127.0.0.1:8084:8082"
 
+  # старый бот («Розыгрыш призов»): после снятия теневого бана снова отвечает
+  # в своих диалогах. Тот же bot.py, но токен старого бота и свой вебхук-путь;
+  # CHECK_BOT_TOKEN пустой — старый бот проверяет подписки сам (он админ каналов).
+  oldbot:
+    build:
+      context: .
+      dockerfile: bot.Dockerfile
+    restart: unless-stopped
+    logging: *default-logging
+    env_file:
+      - .env
+    environment:
+      BOT_TOKEN: ${CHECK_BOT_TOKEN}
+      CHECK_BOT_TOKEN: ""
+      WEBHOOK_URL: ${WEBHOOK_URL_OLD:-}
+    depends_on:
+      - redis
+    ports:
+      # метрики старого бота (Prometheus-обвязка — отдельно, при необходимости)
+      - "127.0.0.1:9116:9114"
+      # вебхук старого бота; nginx: admin.your-zloy.online/max-webhook-old/...
+      - "127.0.0.1:8085:8082"
+
   admin:
     build:
       context: .

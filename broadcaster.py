@@ -30,6 +30,14 @@ STALE_SECONDS = 60.0
 RATE = float(os.getenv("BROADCAST_RATE", "20"))
 
 bot = rate_limit.throttle_bot(Bot(os.getenv("BOT_TOKEN"), disable_link_preview=True))
+# chat_id диалога привязан к паре «юзер-бот»: у юзеров, чья запись живёт у
+# старого бота (CHECK_BOT_TOKEN), основной бот получает chat.not.found —
+# такие доставки пробуем добить старым ботом, лимитер MAX API у них общий
+fallback_bot = (
+    rate_limit.throttle_bot(Bot(os.getenv("CHECK_BOT_TOKEN"), disable_link_preview=True))
+    if os.getenv("CHECK_BOT_TOKEN")
+    else None
+)
 
 
 def is_terminal_error(e: MaxApiError) -> bool:
@@ -50,6 +58,20 @@ async def send_one(delivery: dict) -> None:
             parse_mode=ParseMode.HTML,
         )
     except MaxApiError as e:
+        if is_terminal_error(e) and fallback_bot is not None:
+            try:
+                await fallback_bot.send_message(
+                    chat_id=chat_id,
+                    text=delivery["body"],
+                    parse_mode=ParseMode.HTML,
+                )
+                await pg_storage.mark_delivery_sent(broadcast_id, chat_id)
+                return
+            except Exception as fe:
+                logging.warning(
+                    "Фолбэк-отправка %s/%s тоже не удалась: %r",
+                    broadcast_id, chat_id, fe,
+                )
         retriable = not is_terminal_error(e)
         logging.warning(
             "Ошибка отправки %s/%s (retriable=%s): %s",
